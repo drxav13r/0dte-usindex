@@ -1,0 +1,6 @@
+results/
+quote_cache/
+*.log
+__pycache__/
+*.pyc
+.env
