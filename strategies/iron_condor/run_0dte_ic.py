@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
-0DTE Adaptive Iron Condor — SPY + QQQ + SPXW
-==============================================
-Sells a same-day-expiry iron condor on SPY, QQQ, and SPXW every eligible
-trading day.
+0DTE Adaptive Iron Condor — SPY + QQQ
+======================================
+Sells a same-day-expiry iron condor on SPY and QQQ every eligible trading day.
 
 Strike selection
 ----------------
@@ -14,8 +13,8 @@ grid is evaluated and the combination with the best premium / max_loss
 reward-to-risk ratio is selected.  Put wings are widened proportionally to the
 CBOE SKEW z-score for extra downside protection on skewed days.
 
-Dynamic gate (any one signal skips the day)
---------------------------------------------
+Dynamic gate (any one signal skips the day — thresholds are per-ticker)
+------------------------------------------------------------------------
   vrp_low      : IV−RV z-score < threshold  (premium too cheap vs realised vol)
   vix_high     : VIX 252d %-rank > threshold (extreme fear regime)
   vvix_high    : VVIX 252d %-rank > threshold (vol-of-vol spiking)
@@ -24,16 +23,15 @@ Dynamic gate (any one signal skips the day)
 
 Ticker configuration
 --------------------
-Each ticker has its own start date (first date with confirmed full Mon-Fri
-daily 0DTE expirations) and underlying price feed:
+Each ticker has its own start date, wing-grid, and gate thresholds:
 
-  SPY   underlying=SPY    start=2023-01-01
-  QQQ   underlying=QQQ    start=2023-01-01
-  SPXW  underlying=^GSPC  start=2022-05-16  (full Mon-Fri from ~May 2022)
+  SPY  start=2023-01-01  standard wings + standard gate
+  QQQ  start=2023-01-01  wider wings (higher realised vol) + stricter gate
 
-Per-ticker capital is sized so that the 1-sigma expected daily move equals
-CAPITAL_PER_TICKER_DAY, keeping dollar risk comparable across tickers
-regardless of notional price differences (SPX ~10x SPY).
+0DTE availability (confirmed via Theta Data API)
+-------------------------------------------------
+  SPY   Mon/Wed/Fri ~2016  →  full Mon-Fri 2023-01-01
+  QQQ   Mon/Wed/Fri ~2021  →  full Mon-Fri 2023-01-01
 
 Data source
 -----------
@@ -41,17 +39,10 @@ Intraday option quotes are fetched from a local Theta Data terminal
 (http://127.0.0.1:25503/v3) with a file-based cache to avoid redundant calls.
 Underlying OHLC and vol-surface signals are pulled from yfinance.
 
-0DTE availability (confirmed via Theta Data API)
--------------------------------------------------
-  SPY   Mon/Wed/Fri ~2016  →  full Mon-Fri 2023-01-01
-  QQQ   Mon/Wed/Fri ~2021  →  full Mon-Fri 2023-01-01
-  SPXW  Mon/Wed/Fri ~2021  →  full Mon-Fri ~2022-05-16
-  IWM   Mon/Wed/Fri ~2022  →  full Mon-Fri ~2024-05-06
-
 Usage
 -----
   python run_0dte_ic.py [--out DIR] [--start YYYY-MM-DD] [--end YYYY-MM-DD]
-                        [--tickers SPY QQQ SPXW]
+                        [--tickers SPY QQQ]
 """
 import argparse, csv, io, json, math
 from pathlib import Path
@@ -70,35 +61,56 @@ except ImportError as e:
 THETA_BASE = 'http://127.0.0.1:25503/v3'
 
 # ── Per-ticker configuration ─────────────────────────────────────────────────
-# underlying : yfinance symbol for open/close price used in strike sizing
-# start      : first date with confirmed full Mon-Fri 0DTE expirations
+# underlying        : yfinance symbol for open/close price used in strike sizing
+# start             : first date with confirmed full Mon-Fri 0DTE expirations
+# n_short_sigma     : grid of short-strike distances (× daily 1-sigma)
+# n_wing_sigma      : grid of wing widths (× daily 1-sigma)
+# skew_put_mult_max : max put-wing widening multiplier (SKEW asymmetry)
+# skew_put_mult_slope: slope of put-wing mult vs SKEW z-score
+# Gate thresholds — any one triggered skips the day:
+#   vrp_zscore_min  : VRP z-score below this → premium too cheap
+#   vix_pct_max     : VIX 252d %-rank above this → extreme fear
+#   vvix_pct_max    : VVIX 252d %-rank above this → vol-of-vol spike
+#   skew_zscore_max : SKEW z-score above this → extreme tail-put demand
+#   term_inv_ratio  : VIX9D / VIX above this → inverted near-term structure
 TICKERS_CONFIG = {
-    'SPY':  {'underlying': 'SPY',    'start': '2023-01-01'},
-    'QQQ':  {'underlying': 'QQQ',    'start': '2023-01-01'},
-    'SPXW': {'underlying': '^GSPC',  'start': '2022-05-16'},
+    'SPY': {
+        'underlying': 'SPY', 'start': '2023-01-01',
+        # Wings: standard sigma grid
+        'n_short_sigma': [1.0, 1.25, 1.5, 1.75, 2.0],
+        'n_wing_sigma':  [0.5, 0.75, 1.0, 1.25],
+        'skew_put_mult_max':   1.30,
+        'skew_put_mult_slope': 0.20,
+        # Gate: standard thresholds
+        'vrp_zscore_min':  -0.5,
+        'vix_pct_max':      0.80,
+        'vvix_pct_max':     0.85,
+        'skew_zscore_max':  1.5,
+        'term_inv_ratio':   1.01,
+    },
+    'QQQ': {
+        'underlying': 'QQQ', 'start': '2023-01-01',
+        # Wings: start wider — QQQ realised vol is ~30% higher than SPY;
+        # wider short strikes avoid being touched by routine daily swings
+        'n_short_sigma': [1.25, 1.5, 1.75, 2.0, 2.25],
+        'n_wing_sigma':  [0.75, 1.0, 1.25, 1.5],
+        'skew_put_mult_max':   1.40,   # more downside protection for tech skew
+        'skew_put_mult_slope': 0.25,
+        # Gate: stricter — QQQ is more sensitive to macro/rate stress
+        'vrp_zscore_min':  -0.3,
+        'vix_pct_max':      0.75,
+        'vvix_pct_max':     0.80,
+        'skew_zscore_max':  1.5,
+        'term_inv_ratio':   1.01,
+    },
 }
 
-DEFAULT_TICKERS = ['SPY', 'QQQ', 'SPXW']
+DEFAULT_TICKERS = ['SPY', 'QQQ']
 DEFAULT_OUT     = Path(__file__).parent / 'results'
 DEFAULT_END     = None
 
 DATA_LOOKBACK_YEARS = 2      # extra history before earliest start for rolling calcs
 CAPITAL_PER_TICKER_DAY = 10_000.0
-
-# ── Dynamic wing grid (in units of daily 1-sigma) ────────────────────────────
-N_SHORT_SIGMA = [1.0, 1.25, 1.5, 1.75, 2.0]
-N_WING_SIGMA  = [0.5, 0.75, 1.0, 1.25]
-
-# Put-wing asymmetry: widen put wing when SKEW z-score is elevated
-SKEW_PUT_MULT_MAX   = 1.30
-SKEW_PUT_MULT_SLOPE = 0.20    # mult = 1 + slope × clamp(skew_z, 0, 1.5)
-
-# ── Gate thresholds ───────────────────────────────────────────────────────────
-VRP_ZSCORE_MIN  = -0.5
-VIX_PCT_MAX     =  0.80
-VVIX_PCT_MAX    =  0.85
-SKEW_ZSCORE_MAX =  1.5
-TERM_INV_RATIO  =  1.01
 
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -172,21 +184,22 @@ def nearest_strike(arr, target):
 
 # ── Strike selection ──────────────────────────────────────────────────────────
 
-def select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today):
+def select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today, cfg):
     """
-    Scan N_SHORT_SIGMA × N_WING_SIGMA grid with sigma-scaled targets.
+    Scan cfg['n_short_sigma'] × cfg['n_wing_sigma'] grid with sigma-scaled targets.
     Short strikes at n_short × daily_sigma OTM; long legs an additional
     n_wing × daily_sigma (put side widened by skew multiplier).
     Returns combo with best premium / max_loss, or None.
     """
     daily_sigma    = (vix_today / 100.0) / math.sqrt(252)
     skew_z_clamped = max(0.0, min(skew_z_today or 0.0, 1.5))
-    put_wing_mult  = min(SKEW_PUT_MULT_MAX, 1.0 + SKEW_PUT_MULT_SLOPE * skew_z_clamped)
+    put_wing_mult  = min(cfg['skew_put_mult_max'],
+                         1.0 + cfg['skew_put_mult_slope'] * skew_z_clamped)
 
     best       = None
     best_ratio = -np.inf
 
-    for n_short in N_SHORT_SIGMA:
+    for n_short in cfg['n_short_sigma']:
         short_w = n_short * daily_sigma
         ksc = nearest_strike(strikes, S_open * (1 + short_w))
         ksp = nearest_strike(strikes, S_open * (1 - short_w))
@@ -198,7 +211,7 @@ def select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today):
         if np.isnan(scb) or np.isnan(spb) or scb <= 0 or spb <= 0:
             continue
 
-        for n_wing in N_WING_SIGMA:
+        for n_wing in cfg['n_wing_sigma']:
             klc = nearest_strike(strikes, S_open * (1 + short_w + n_wing * daily_sigma))
             klp = nearest_strike(strikes, S_open * (1 - short_w - n_wing * daily_sigma * put_wing_mult))
             if klc is None or klp is None or klc <= ksc or klp >= ksp:
@@ -231,7 +244,7 @@ def select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today):
 
 # ── Per-day trade execution ───────────────────────────────────────────────────
 
-def run_one(symbol, dt, S_open, S_close, vix_today, skew_z_today, cache_dir):
+def run_one(symbol, dt, S_open, S_close, vix_today, skew_z_today, cache_dir, cfg):
     df, src = fetch_quote_history(symbol, dt, cache_dir)
     if df is None or df.empty:
         return {'ticker': symbol, 'date': dt, 'traded': False, 'reason': src, 'pnl_usd': 0.0}
@@ -243,7 +256,7 @@ def run_one(symbol, dt, S_open, S_close, vix_today, skew_z_today, cache_dir):
 
     lkp     = build_quote_lookup(df)
     strikes = np.sort(df['strike'].dropna().astype(float).unique())
-    best    = select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today)
+    best    = select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today, cfg)
 
     if best is None:
         return {'ticker': symbol, 'date': dt, 'traded': False, 'reason': 'no_valid_combo', 'pnl_usd': 0.0}
@@ -336,10 +349,10 @@ def dl_ohlc(tickers, start, end):
 
 def compute_gate_signals(all_dates, spx_close, vix, vix9d, vvix, skew):
     """
-    Returns {date_str: (skip, reasons, vix_val, skew_z_val)}.
+    Returns {date_str: dict} with raw signal values for per-ticker gate evaluation.
 
-    Uses SPX (^GSPC) realised vol for VRP — exact for SPXW and a close proxy
-    for SPY/QQQ.  Five signals, any one triggers a skip.
+    Keys per date: vrp_z, vix_pct, vvix_pct, skew_z, term_inv (bool), vix, skew_z.
+    Uses SPX (^GSPC) realised vol for VRP — close proxy for SPY/QQQ.
     """
     idx = pd.DatetimeIndex([pd.Timestamp(d) for d in all_dates])
 
@@ -367,9 +380,9 @@ def compute_gate_signals(all_dates, spx_close, vix, vix9d, vvix, skew):
     vix_pct  = pct_rank(vix_a)
     vvix_pct = pct_rank(vvix_a)
     skew_z   = zscore(skew_a)
-    term_inv = (vix9d_a / (vix_a + 1e-9)) > TERM_INV_RATIO
+    term_inv = (vix9d_a / (vix_a + 1e-9))   # ratio; threshold applied per-ticker
 
-    gate = {}
+    signals = {}
     for ts in idx:
         d_str = ts.strftime('%Y-%m-%d')
 
@@ -377,18 +390,26 @@ def compute_gate_signals(all_dates, spx_close, vix, vix9d, vvix, skew):
             val = s.loc[ts] if ts in s.index else np.nan
             return None if pd.isna(val) else float(val)
 
-        reasons = []
-        vz  = get(vrp_z);    vz  is not None and vz  < VRP_ZSCORE_MIN  and reasons.append('vrp_low')
-        vp  = get(vix_pct);  vp  is not None and vp  > VIX_PCT_MAX     and reasons.append('vix_high')
-        vvp = get(vvix_pct); vvp is not None and vvp > VVIX_PCT_MAX    and reasons.append('vvix_high')
-        sz  = get(skew_z);   sz  is not None and sz  > SKEW_ZSCORE_MAX and reasons.append('skew_extreme')
-        ti  = term_inv.loc[ts] if ts in term_inv.index else False
-        bool(ti) and reasons.append('term_inv')
+        signals[d_str] = {
+            'vrp_z':    get(vrp_z),
+            'vix_pct':  get(vix_pct),
+            'vvix_pct': get(vvix_pct),
+            'skew_z':   get(skew_z),
+            'term_inv_ratio': get(term_inv),
+            'vix':      get(vix_a) or 20.0,
+        }
+    return signals
 
-        gate[d_str] = (bool(reasons), ','.join(reasons),
-                       get(vix_a) or 20.0,
-                       get(skew_z) or 0.0)
-    return gate
+
+def apply_gate(sig, cfg):
+    """Apply per-ticker gate thresholds to a signal dict. Returns (skip, reason_str)."""
+    reasons = []
+    vz  = sig.get('vrp_z');         vz  is not None and vz  < cfg['vrp_zscore_min']  and reasons.append('vrp_low')
+    vp  = sig.get('vix_pct');       vp  is not None and vp  > cfg['vix_pct_max']     and reasons.append('vix_high')
+    vvp = sig.get('vvix_pct');      vvp is not None and vvp > cfg['vvix_pct_max']    and reasons.append('vvix_high')
+    sz  = sig.get('skew_z');        sz  is not None and sz  > cfg['skew_zscore_max'] and reasons.append('skew_extreme')
+    ti  = sig.get('term_inv_ratio'); ti  is not None and ti  > cfg['term_inv_ratio'] and reasons.append('term_inv')
+    return bool(reasons), ','.join(reasons)
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -438,11 +459,13 @@ def main():
     all_dates = sorted({d for sym_px in px.values() for d in sym_px})
     log(f'Total unique dates: {len(all_dates)}')
 
-    gate = compute_gate_signals(all_dates, spx_close, vix, vix9d, vvix, skew)
+    signals = compute_gate_signals(all_dates, spx_close, vix, vix9d, vvix, skew)
 
     trade_dates = [d for d in all_dates if d >= earliest_start]
-    gated = sum(1 for d in trade_dates if gate.get(d, (False,))[0])
-    log(f'Trade-eligible dates: {len(trade_dates)}, gated out: {gated}')
+    # gate count is informational — use SPY thresholds as reference
+    ref_cfg = next(iter(active.values()))
+    gated = sum(1 for d in trade_dates if apply_gate(signals.get(d, {}), ref_cfg)[0])
+    log(f'Trade-eligible dates: {len(trade_dates)}, gated out (SPY ref): {gated}')
 
     fields = ['ticker', 'date', 'traded', 'reason', 'pnl_usd', 'won',
               'S_open', 'S_close', 'premium', 'close_cost',
@@ -454,7 +477,9 @@ def main():
 
     all_rows = []
     for i, dt in enumerate(trade_dates, 1):
-        skip, reason, vix_today, skew_z_today = gate.get(dt, (False, '', 20.0, 0.0))
+        sig = signals.get(dt, {})
+        vix_today   = sig.get('vix', 20.0)
+        skew_z_today = sig.get('skew_z') or 0.0
 
         for sym, cfg in active.items():
             if dt < ticker_starts[sym]:
@@ -465,12 +490,13 @@ def main():
                                  'reason': 'no_underlying_px', 'pnl_usd': 0.0})
                 continue
             S_open, S_close = prices
+            skip, reason = apply_gate(sig, cfg)
             if skip:
                 all_rows.append({'ticker': sym, 'date': dt, 'traded': False,
                                  'reason': f'gate:{reason}', 'pnl_usd': 0.0})
             else:
                 all_rows.append(run_one(sym, dt, S_open, S_close,
-                                        vix_today, skew_z_today, cache_dir))
+                                        vix_today, skew_z_today, cache_dir, cfg))
 
         if i % 10 == 0:
             pd.DataFrame(all_rows).to_csv(trades_path, index=False)
