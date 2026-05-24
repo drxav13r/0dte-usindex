@@ -405,7 +405,11 @@ def main():
     args = parser.parse_args()
 
     active = {t: TICKERS_CONFIG[t] for t in args.tickers}
-    ticker_starts  = {t: (args.start or cfg['start']) for t, cfg in active.items()}
+    # --start pushes each ticker's start later but never earlier than its config start
+    ticker_starts  = {
+        t: (max(args.start, cfg['start']) if args.start else cfg['start'])
+        for t, cfg in active.items()
+    }
     earliest_start = min(ticker_starts.values())
     data_start     = str(pd.Timestamp(earliest_start) - pd.DateOffset(years=DATA_LOOKBACK_YEARS))[:10]
 
