@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-0DTE Adaptive Iron Condor — SPY + QQQ
-======================================
-Sells a same-day-expiry iron condor on SPY and QQQ every eligible trading day.
+0DTE Adaptive Iron Condor — SPY + QQQ + SPXW
+==============================================
+Sells a same-day-expiry iron condor on SPY, QQQ, and SPXW every eligible
+trading day.
 
 Strike selection
 ----------------
@@ -21,23 +22,36 @@ Dynamic gate (any one signal skips the day)
   skew_extreme : CBOE SKEW z-score > threshold (extreme tail-put demand)
   term_inv     : VIX9D / VIX > threshold    (near-term stress / inverted term structure)
 
+Ticker configuration
+--------------------
+Each ticker has its own start date (first date with confirmed full Mon-Fri
+daily 0DTE expirations) and underlying price feed:
+
+  SPY   underlying=SPY    start=2023-01-01
+  QQQ   underlying=QQQ    start=2023-01-01
+  SPXW  underlying=^GSPC  start=2022-05-16  (full Mon-Fri from ~May 2022)
+
+Per-ticker capital is sized so that the 1-sigma expected daily move equals
+CAPITAL_PER_TICKER_DAY, keeping dollar risk comparable across tickers
+regardless of notional price differences (SPX ~10x SPY).
+
 Data source
 -----------
 Intraday option quotes are fetched from a local Theta Data terminal
 (http://127.0.0.1:25503/v3) with a file-based cache to avoid redundant calls.
 Underlying OHLC and vol-surface signals are pulled from yfinance.
 
-Availability
-------------
-Full Mon-Fri daily 0DTE expirations confirmed from:
-  SPY  : 2023-01-01
-  QQQ  : 2023-01-01
-  SPXW : ~2022-05-16
-  IWM  : ~2024-05-06
+0DTE availability (confirmed via Theta Data API)
+-------------------------------------------------
+  SPY   Mon/Wed/Fri ~2016  →  full Mon-Fri 2023-01-01
+  QQQ   Mon/Wed/Fri ~2021  →  full Mon-Fri 2023-01-01
+  SPXW  Mon/Wed/Fri ~2021  →  full Mon-Fri ~2022-05-16
+  IWM   Mon/Wed/Fri ~2022  →  full Mon-Fri ~2024-05-06
 
 Usage
 -----
-  python run_0dte_ic.py [--out /path/to/output] [--start YYYY-MM-DD] [--end YYYY-MM-DD]
+  python run_0dte_ic.py [--out DIR] [--start YYYY-MM-DD] [--end YYYY-MM-DD]
+                        [--tickers SPY QQQ SPXW]
 """
 import argparse, csv, io, json, math
 from pathlib import Path
@@ -55,26 +69,31 @@ except ImportError as e:
 # ── Theta Data local terminal ────────────────────────────────────────────────
 THETA_BASE = 'http://127.0.0.1:25503/v3'
 
-# ── Defaults (overridable via CLI) ───────────────────────────────────────────
-DEFAULT_OUT   = Path(__file__).parent / 'results'
-DEFAULT_START = '2023-01-01'   # full Mon-Fri 0DTE available for SPY + QQQ from this date
-DEFAULT_END   = None           # None = up to latest available
+# ── Per-ticker configuration ─────────────────────────────────────────────────
+# underlying : yfinance symbol for open/close price used in strike sizing
+# start      : first date with confirmed full Mon-Fri 0DTE expirations
+TICKERS_CONFIG = {
+    'SPY':  {'underlying': 'SPY',    'start': '2023-01-01'},
+    'QQQ':  {'underlying': 'QQQ',    'start': '2023-01-01'},
+    'SPXW': {'underlying': '^GSPC',  'start': '2022-05-16'},
+}
 
-TICKERS    = ['SPY', 'QQQ']
-DATA_START_LOOKBACK = 2        # years of extra history before START for rolling calculations
+DEFAULT_TICKERS = ['SPY', 'QQQ', 'SPXW']
+DEFAULT_OUT     = Path(__file__).parent / 'results'
+DEFAULT_END     = None
+
+DATA_LOOKBACK_YEARS = 2      # extra history before earliest start for rolling calcs
 CAPITAL_PER_TICKER_DAY = 10_000.0
 
-# ── Dynamic wing grid (in units of daily 1-sigma) ───────────────────────────
-# Short legs placed N_short × (VIX/100/√252) OTM from spot.
-# Long legs placed an additional N_wing × (VIX/100/√252) beyond the short legs.
+# ── Dynamic wing grid (in units of daily 1-sigma) ────────────────────────────
 N_SHORT_SIGMA = [1.0, 1.25, 1.5, 1.75, 2.0]
 N_WING_SIGMA  = [0.5, 0.75, 1.0, 1.25]
 
-# Put-wing asymmetry: widen put wing when SKEW z-score is positive
+# Put-wing asymmetry: widen put wing when SKEW z-score is elevated
 SKEW_PUT_MULT_MAX   = 1.30
 SKEW_PUT_MULT_SLOPE = 0.20    # mult = 1 + slope × clamp(skew_z, 0, 1.5)
 
-# ── Gate thresholds ──────────────────────────────────────────────────────────
+# ── Gate thresholds ───────────────────────────────────────────────────────────
 VRP_ZSCORE_MIN  = -0.5
 VIX_PCT_MAX     =  0.80
 VVIX_PCT_MAX    =  0.85
@@ -82,7 +101,7 @@ SKEW_ZSCORE_MAX =  1.5
 TERM_INV_RATIO  =  1.01
 
 
-# ── Logging ──────────────────────────────────────────────────────────────────
+# ── Logging ───────────────────────────────────────────────────────────────────
 
 def make_logger(log_path):
     def log(msg):
@@ -93,7 +112,7 @@ def make_logger(log_path):
     return log
 
 
-# ── Theta Data helpers ───────────────────────────────────────────────────────
+# ── Theta Data helpers ────────────────────────────────────────────────────────
 
 def http_csv(path, params, timeout=45):
     url = THETA_BASE + path + '?' + urlencode(params)
@@ -151,14 +170,14 @@ def nearest_strike(arr, target):
     return float(arr[np.argmin(np.abs(arr - target))])
 
 
-# ── Strike selection ─────────────────────────────────────────────────────────
+# ── Strike selection ──────────────────────────────────────────────────────────
 
 def select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today):
     """
     Scan N_SHORT_SIGMA × N_WING_SIGMA grid with sigma-scaled targets.
-    Short strikes placed at n_short × daily_sigma OTM; long legs an additional
-    n_wing × daily_sigma beyond (put side widened by skew multiplier).
-    Returns the combo with best premium / max_loss, or None.
+    Short strikes at n_short × daily_sigma OTM; long legs an additional
+    n_wing × daily_sigma (put side widened by skew multiplier).
+    Returns combo with best premium / max_loss, or None.
     """
     daily_sigma    = (vix_today / 100.0) / math.sqrt(252)
     skew_z_clamped = max(0.0, min(skew_z_today or 0.0, 1.5))
@@ -255,7 +274,7 @@ def run_one(symbol, dt, S_open, S_close, vix_today, skew_z_today, cache_dir):
             'rr_ratio': best['rr_ratio'], 'source': src}
 
 
-# ── Metrics ───────────────────────────────────────────────────────────────────
+# ── Metrics ────────────────────────────────────────────────────────────────────
 
 def metrics(trades):
     df = pd.DataFrame(trades)
@@ -267,15 +286,21 @@ def metrics(trades):
     cum    = daily.cumsum()
     dd     = cum - cum.cummax()
     sharpe = float(daily.mean() / (daily.std() + 1e-9) * math.sqrt(252)) if len(daily) > 1 else 0.0
+    by_ticker = (t.groupby('ticker')
+                  .agg(trades=('pnl_usd', 'count'),
+                       win_rate=('won', 'mean'),
+                       total_pnl=('pnl_usd', 'sum'))
+                  .round(4).to_dict('index'))
     return dict(rows=len(df), trades=len(t),
                 start=str(t['date'].min().date()), end=str(t['date'].max().date()),
                 win_rate=float((t['pnl_usd'] > 0).mean()),
                 total_pnl=float(t['pnl_usd'].sum()),
                 sharpe=sharpe, max_dd=float(dd.min()),
-                skipped=int((df.get('traded', False) != True).sum()))
+                skipped=int((df.get('traded', False) != True).sum()),
+                by_ticker=by_ticker)
 
 
-# ── Market data helpers ───────────────────────────────────────────────────────
+# ── Market data helpers ────────────────────────────────────────────────────────
 
 def dl_close(ticker, start, end):
     df = yf.download(ticker, start=start, end=end, auto_adjust=False, progress=False)
@@ -285,23 +310,38 @@ def dl_close(ticker, start, end):
     return s.iloc[:, 0] if isinstance(s, pd.DataFrame) else s
 
 
-# ── Gate computation ──────────────────────────────────────────────────────────
+def dl_ohlc(tickers, start, end):
+    """Download Open+Close for a list of yfinance tickers. Returns {ticker: {date_str: (O,C)}}."""
+    unique = list(set(tickers))
+    raw = yf.download(unique, start=start, end=end,
+                      auto_adjust=False, progress=False, group_by='ticker')
+    if raw.empty:
+        return {}
+    result = {}
+    for sym in unique:
+        try:
+            o_s = raw[(sym, 'Open')]  if len(unique) > 1 else raw['Open']
+            c_s = raw[(sym, 'Close')] if len(unique) > 1 else raw['Close']
+            result[sym] = {
+                pd.Timestamp(dt).strftime('%Y-%m-%d'): (float(o), float(c))
+                for dt, o, c in zip(o_s.index, o_s.values, c_s.values)
+                if np.isfinite(float(o)) and np.isfinite(float(c))
+            }
+        except Exception:
+            result[sym] = {}
+    return result
 
-def compute_gate_signals(dates, spy_close, vix, vix9d, vvix, skew):
+
+# ── Gate computation ───────────────────────────────────────────────────────────
+
+def compute_gate_signals(all_dates, spx_close, vix, vix9d, vvix, skew):
     """
     Returns {date_str: (skip, reasons, vix_val, skew_z_val)}.
 
-    Five signals — any one triggers a skip:
-      vrp_low      : VRP z-score < VRP_ZSCORE_MIN   (selling vol too cheap vs realised)
-      vix_high     : VIX 252d %-rank > VIX_PCT_MAX   (extreme fear)
-      vvix_high    : VVIX 252d %-rank > VVIX_PCT_MAX (vol-of-vol spiking)
-      skew_extreme : SKEW z-score > SKEW_ZSCORE_MAX  (extreme tail-put demand)
-      term_inv     : VIX9D/VIX > TERM_INV_RATIO      (inverted term structure)
-
-    vix_val and skew_z_val are passed through to select_best_combo for
-    dynamic wing sizing.
+    Uses SPX (^GSPC) realised vol for VRP — exact for SPXW and a close proxy
+    for SPY/QQQ.  Five signals, any one triggers a skip.
     """
-    idx = pd.DatetimeIndex([pd.Timestamp(d) for d, _ in dates])
+    idx = pd.DatetimeIndex([pd.Timestamp(d) for d in all_dates])
 
     def align(s):
         if s is None or s.empty:
@@ -313,7 +353,7 @@ def compute_gate_signals(dates, spy_close, vix, vix9d, vvix, skew):
     vvix_a  = align(vvix)
     skew_a  = align(skew)
 
-    rv21 = (np.log(spy_close / spy_close.shift(1))
+    rv21 = (np.log(spx_close / spx_close.shift(1))
             .rolling(21, min_periods=10).std() * math.sqrt(252) * 100)
     vrp  = vix_a - align(rv21)
 
@@ -330,7 +370,9 @@ def compute_gate_signals(dates, spy_close, vix, vix9d, vvix, skew):
     term_inv = (vix9d_a / (vix_a + 1e-9)) > TERM_INV_RATIO
 
     gate = {}
-    for ts, (d_str, _) in zip(idx, dates):
+    for ts in idx:
+        d_str = ts.strftime('%Y-%m-%d')
+
         def get(s):
             val = s.loc[ts] if ts in s.index else np.nan
             return None if pd.isna(val) else float(val)
@@ -349,19 +391,25 @@ def compute_gate_signals(dates, spy_close, vix, vix9d, vvix, skew):
     return gate
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description='0DTE Adaptive Iron Condor Backtest')
-    parser.add_argument('--out',   type=Path, default=DEFAULT_OUT,   help='Output directory')
-    parser.add_argument('--start', default=DEFAULT_START,            help='First trading date (YYYY-MM-DD)')
-    parser.add_argument('--end',   default=DEFAULT_END,              help='Last trading date (YYYY-MM-DD), default=latest')
+    parser.add_argument('--tickers', nargs='+', default=DEFAULT_TICKERS,
+                        choices=list(TICKERS_CONFIG), metavar='T',
+                        help=f'Tickers to trade (default: {DEFAULT_TICKERS})')
+    parser.add_argument('--out',   type=Path, default=DEFAULT_OUT)
+    parser.add_argument('--start', default=None,
+                        help='Override start date for ALL tickers (YYYY-MM-DD)')
+    parser.add_argument('--end',   default=DEFAULT_END)
     args = parser.parse_args()
 
-    out   = args.out
-    start = args.start
-    end   = args.end
+    active = {t: TICKERS_CONFIG[t] for t in args.tickers}
+    ticker_starts  = {t: (args.start or cfg['start']) for t, cfg in active.items()}
+    earliest_start = min(ticker_starts.values())
+    data_start     = str(pd.Timestamp(earliest_start) - pd.DateOffset(years=DATA_LOOKBACK_YEARS))[:10]
 
+    out = args.out
     out.mkdir(parents=True, exist_ok=True)
     cache_dir = out / 'quote_cache'
     cache_dir.mkdir(exist_ok=True)
@@ -369,44 +417,28 @@ def main():
     log = make_logger(out / 'run.log')
     (out / 'run.log').write_text('')
 
-    # Extra lookback so 252d rolling windows are warm by START
-    data_start = str(pd.Timestamp(start) - pd.DateOffset(years=DATA_START_LOOKBACK))[:10]
+    log(f'Tickers: {list(active)} | data from {data_start} | starts: {ticker_starts}')
 
-    log(f'Downloading market data from {data_start}, trading from {start}')
-    px     = yf.download(TICKERS,  start=data_start, end=end, auto_adjust=False, progress=False, group_by='ticker')
-    spy_cl = dl_close('SPY',       data_start, end)
-    vix    = dl_close('^VIX',      data_start, end)
-    vix9d  = dl_close('^VIX9D',    data_start, end)
-    vvix   = dl_close('^VVIX',     data_start, end)
-    skew   = dl_close('^SKEW',     data_start, end)
+    underlying_syms = list({cfg['underlying'] for cfg in active.values()})
+    log(f'Downloading underlyings {underlying_syms} + signal series from {data_start}')
+    px = dl_ohlc(underlying_syms, data_start, args.end)
 
-    if px.empty:
-        raise RuntimeError('No underlying data from yfinance')
+    spx_close = dl_close('^GSPC', data_start, args.end)
+    vix       = dl_close('^VIX',   data_start, args.end)
+    vix9d     = dl_close('^VIX9D', data_start, args.end)
+    vvix      = dl_close('^VVIX',  data_start, args.end)
+    skew      = dl_close('^SKEW',  data_start, args.end)
 
-    log(f'VIX={len(vix)} VIX9D={len(vix9d)} VVIX={len(vvix)} SKEW={len(skew)} rows')
+    log(f'SPX={len(spx_close)} VIX={len(vix)} VIX9D={len(vix9d)} VVIX={len(vvix)} SKEW={len(skew)} rows')
 
-    dates = []
-    for dt in px.index:
-        ok, row = True, {}
-        for sym in TICKERS:
-            try:
-                o = float(px[(sym, 'Open')].loc[dt])
-                c = float(px[(sym, 'Close')].loc[dt])
-                if not np.isfinite(o + c):
-                    ok = False
-                row[sym] = (o, c)
-            except Exception:
-                ok = False
-        if ok:
-            dates.append((pd.Timestamp(dt).strftime('%Y-%m-%d'), row))
+    all_dates = sorted({d for sym_px in px.values() for d in sym_px})
+    log(f'Total unique dates: {len(all_dates)}')
 
-    log(f'Total yfinance dates: {len(dates)}')
+    gate = compute_gate_signals(all_dates, spx_close, vix, vix9d, vvix, skew)
 
-    gate = compute_gate_signals(dates, spy_cl, vix, vix9d, vvix, skew)
-
-    trade_dates = [(d, r) for d, r in dates if d >= start]
-    gated_count = sum(1 for d, _ in trade_dates if gate.get(d, (False,))[0])
-    log(f'Trading dates: {len(trade_dates)}, gated out: {gated_count}')
+    trade_dates = [d for d in all_dates if d >= earliest_start]
+    gated = sum(1 for d in trade_dates if gate.get(d, (False,))[0])
+    log(f'Trade-eligible dates: {len(trade_dates)}, gated out: {gated}')
 
     fields = ['ticker', 'date', 'traded', 'reason', 'pnl_usd', 'won',
               'S_open', 'S_close', 'premium', 'close_cost',
@@ -417,26 +449,36 @@ def main():
         csv.DictWriter(f, fieldnames=fields, extrasaction='ignore').writeheader()
 
     all_rows = []
-    for i, (dt, row) in enumerate(trade_dates, 1):
+    for i, dt in enumerate(trade_dates, 1):
         skip, reason, vix_today, skew_z_today = gate.get(dt, (False, '', 20.0, 0.0))
-        if skip:
-            for sym in TICKERS:
+
+        for sym, cfg in active.items():
+            if dt < ticker_starts[sym]:
+                continue
+            prices = px.get(cfg['underlying'], {}).get(dt)
+            if prices is None:
+                all_rows.append({'ticker': sym, 'date': dt, 'traded': False,
+                                 'reason': 'no_underlying_px', 'pnl_usd': 0.0})
+                continue
+            S_open, S_close = prices
+            if skip:
                 all_rows.append({'ticker': sym, 'date': dt, 'traded': False,
                                  'reason': f'gate:{reason}', 'pnl_usd': 0.0})
-        else:
-            for sym in TICKERS:
-                all_rows.append(run_one(sym, dt, *row[sym], vix_today, skew_z_today, cache_dir))
+            else:
+                all_rows.append(run_one(sym, dt, S_open, S_close,
+                                        vix_today, skew_z_today, cache_dir))
 
         if i % 10 == 0:
             pd.DataFrame(all_rows).to_csv(trades_path, index=False)
             m = metrics(all_rows)
             (out / 'summary.json').write_text(json.dumps(m, indent=2))
-            log(f'progress dates={i}/{len(trade_dates)} rows={len(all_rows)} {m}')
+            log(f'progress dates={i}/{len(trade_dates)} rows={len(all_rows)} '
+                f'trades={m.get("trades", 0)} pnl={m.get("total_pnl", 0):.0f}')
 
     pd.DataFrame(all_rows).to_csv(trades_path, index=False)
     m = metrics(all_rows)
     (out / 'summary.json').write_text(json.dumps(m, indent=2))
-    log(f'FINAL {m}')
+    log(f'FINAL {json.dumps(m)}')
 
     try:
         import matplotlib; matplotlib.use('Agg')
@@ -444,13 +486,28 @@ def main():
         t = pd.DataFrame(all_rows)
         t = t[t['traded'] == True].copy()
         t['date'] = pd.to_datetime(t['date'])
-        daily = t.groupby('date')['pnl_usd'].sum().sort_index()
-        cum   = daily.cumsum()
-        fig, ax = plt.subplots(figsize=(12, 6))
-        ax.plot(cum.index, cum.values)
-        ax.set_title('Adaptive 0DTE IC SPY+QQQ — dynamic sigma wings + multi-signal gate')
-        ax.grid(True, alpha=0.3)
-        ax.set_ylabel('Cumulative PnL ($)')
+
+        fig, axes = plt.subplots(2, 1, figsize=(14, 10))
+
+        daily_all = t.groupby('date')['pnl_usd'].sum().sort_index().cumsum()
+        axes[0].plot(daily_all.index, daily_all.values, linewidth=1.5)
+        axes[0].set_title('Combined cumulative PnL — all tickers')
+        axes[0].set_ylabel('Cumulative PnL ($)')
+        axes[0].grid(True, alpha=0.3)
+
+        for sym in active:
+            sub = t[t['ticker'] == sym]
+            if sub.empty:
+                continue
+            daily = sub.groupby('date')['pnl_usd'].sum().sort_index().cumsum()
+            axes[1].plot(daily.index, daily.values, label=sym, linewidth=1.2)
+        axes[1].set_title('Per-ticker cumulative PnL')
+        axes[1].set_ylabel('Cumulative PnL ($)')
+        axes[1].legend()
+        axes[1].grid(True, alpha=0.3)
+
+        fig.suptitle('Adaptive 0DTE Iron Condor — dynamic sigma wings + multi-signal gate',
+                     fontsize=12)
         fig.tight_layout()
         fig.savefig(out / 'equity_curve.png', dpi=150)
         plt.close(fig)
