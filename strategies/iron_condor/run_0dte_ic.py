@@ -271,13 +271,15 @@ def run_one(symbol, dt, S_open, S_close, vix_today, skew_z_today, cache_dir, cfg
         return {'ticker': symbol, 'date': dt, 'traded': False, 'reason': 'missing_exit_quotes',
                 'pnl_usd': 0.0, 'ksc': ksc, 'ksp': ksp, 'klc': klc, 'klp': klp}
 
-    close_cost = (sca_x + spa_x) - (lcb_x + lpb_x)
-    pnl_pc     = max(best['premium'] - close_cost, -best['max_loss'])
-    n_c        = CAPITAL_PER_TICKER_DAY / (S_open * 0.01)
-    pnl_usd    = float(pnl_pc * n_c * 100)
+    close_cost   = (sca_x + spa_x) - (lcb_x + lpb_x)
+    pnl_pc       = max(best['premium'] - close_cost, -best['max_loss'])
+    n_c          = CAPITAL_PER_TICKER_DAY / (S_open * 0.01)
+    pnl_usd      = float(pnl_pc * n_c * 100)
+    max_loss_usd = float(best['max_loss'] * n_c * 100)   # margin required for this position
 
     return {'ticker': symbol, 'date': dt, 'traded': True, 'reason': 'trade',
             'pnl_usd': pnl_usd, 'won': pnl_usd > 0,
+            'max_loss_usd': max_loss_usd,
             'S_open': S_open, 'S_close': S_close,
             'premium': best['premium'], 'close_cost': close_cost,
             'ksc': ksc, 'ksp': ksp, 'klc': klc, 'klp': klp,
@@ -295,20 +297,49 @@ def metrics(trades):
     if t.empty:
         return {}
     t['date'] = pd.to_datetime(t['date'])
-    daily  = t.groupby('date')['pnl_usd'].sum().sort_index()
-    cum    = daily.cumsum()
-    dd     = cum - cum.cummax()
-    sharpe = float(daily.mean() / (daily.std() + 1e-9) * math.sqrt(252)) if len(daily) > 1 else 0.0
+
+    daily     = t.groupby('date')['pnl_usd'].sum().sort_index()
+    cum       = daily.cumsum()
+    dd        = cum - cum.cummax()
+
+    # Sharpe (raw $) — mean/std of daily dollar P&L × sqrt(252); depends on sizing scale
+    sharpe_dollar = float(daily.mean() / (daily.std() + 1e-9) * math.sqrt(252)) if len(daily) > 1 else 0.0
+
+    # Sharpe (margin-based) — daily return = daily_pnl / peak_margin_deployed
+    # peak_margin = max single-day sum of max_loss_usd across all tickers
+    if 'max_loss_usd' in t.columns:
+        daily_margin = t.groupby('date')['max_loss_usd'].sum().sort_index()
+        # reindex to all trading days (non-traded days have 0 margin deployed)
+        daily_margin = daily_margin.reindex(daily.index, fill_value=0)
+        peak_margin  = float(daily_margin.max())
+        if peak_margin > 0:
+            daily_ret    = daily / peak_margin
+            sharpe_margin = float(daily_ret.mean() / (daily_ret.std() + 1e-9) * math.sqrt(252))
+        else:
+            sharpe_margin = 0.0
+    else:
+        peak_margin   = None
+        sharpe_margin = None
+
     by_ticker = (t.groupby('ticker')
                   .agg(trades=('pnl_usd', 'count'),
                        win_rate=('won', 'mean'),
                        total_pnl=('pnl_usd', 'sum'))
                   .round(4).to_dict('index'))
+    years = max((t['date'].max() - t['date'].min()).days / 365.25, 1e-6)
+    total_pnl = float(t['pnl_usd'].sum())
+    ann_return_pct = (total_pnl / peak_margin * 100 / years) if peak_margin else None
+
     return dict(rows=len(df), trades=len(t),
                 start=str(t['date'].min().date()), end=str(t['date'].max().date()),
                 win_rate=float((t['pnl_usd'] > 0).mean()),
-                total_pnl=float(t['pnl_usd'].sum()),
-                sharpe=sharpe, max_dd=float(dd.min()),
+                total_pnl=round(total_pnl, 2),
+                sharpe=round(sharpe_dollar, 4),
+                sharpe_margin=round(sharpe_margin, 4) if sharpe_margin is not None else None,
+                peak_margin_usd=round(peak_margin, 2) if peak_margin is not None else None,
+                ann_return_on_margin_pct=round(ann_return_pct, 2) if ann_return_pct is not None else None,
+                max_dd=float(dd.min()),
+                max_dd_pct=round(float(dd.min()) / peak_margin * 100, 2) if peak_margin else None,
                 skipped=int((df.get('traded', False) != True).sum()),
                 by_ticker=by_ticker)
 
@@ -468,7 +499,7 @@ def main():
     log(f'Trade-eligible dates: {len(trade_dates)}, gated out (SPY ref): {gated}')
 
     fields = ['ticker', 'date', 'traded', 'reason', 'pnl_usd', 'won',
-              'S_open', 'S_close', 'premium', 'close_cost',
+              'max_loss_usd', 'S_open', 'S_close', 'premium', 'close_cost',
               'ksc', 'ksp', 'klc', 'klp',
               'n_short', 'n_wing', 'daily_sigma_pct', 'put_wing_mult', 'rr_ratio', 'source']
     trades_path = out / 'trades.csv'
