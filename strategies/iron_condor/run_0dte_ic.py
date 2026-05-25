@@ -328,7 +328,12 @@ def metrics(trades):
                   .round(4).to_dict('index'))
     years = max((t['date'].max() - t['date'].min()).days / 365.25, 1e-6)
     total_pnl = float(t['pnl_usd'].sum())
-    ann_return_pct = (total_pnl / peak_margin * 100 / years) if peak_margin else None
+    if peak_margin and peak_margin > 0:
+        total_return   = total_pnl / peak_margin
+        cagr_pct       = round(((1 + total_return) ** (1 / years) - 1) * 100, 2)
+        ann_return_pct = round(total_return / years * 100, 2)   # simple (non-compounded)
+    else:
+        cagr_pct = ann_return_pct = None
 
     return dict(rows=len(df), trades=len(t),
                 start=str(t['date'].min().date()), end=str(t['date'].max().date()),
@@ -337,7 +342,8 @@ def metrics(trades):
                 sharpe=round(sharpe_dollar, 4),
                 sharpe_margin=round(sharpe_margin, 4) if sharpe_margin is not None else None,
                 peak_margin_usd=round(peak_margin, 2) if peak_margin is not None else None,
-                ann_return_on_margin_pct=round(ann_return_pct, 2) if ann_return_pct is not None else None,
+                cagr_pct=cagr_pct,
+                ann_return_pct=ann_return_pct,
                 max_dd=float(dd.min()),
                 max_dd_pct=round(float(dd.min()) / peak_margin * 100, 2) if peak_margin else None,
                 skipped=int((df.get('traded', False) != True).sum()),
