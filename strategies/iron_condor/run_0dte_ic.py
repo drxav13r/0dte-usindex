@@ -99,9 +99,9 @@ TICKERS_CONFIG = {
         'term_inv_ratio':   1.01,
         'gap_skip_pct':     0.007,  # skip if open gaps >0.7% from prev close
         # Breach-probability / credit-quality filters
-        'max_breach_prob':  0.35,   # P(either short struck touched) < 35%
-        'rvol_mult':        1.0,    # effective_sigma = max(vix_sigma, rvol5 × 1.0)
-        'min_credit_risk':  0.12,   # premium must be ≥12% of max_loss
+        'max_breach_prob':  0.40,   # P(breach) using intraday sigma (open→close only)
+        'rvol_mult':        1.0,
+        'min_credit_risk':  0.04,   # 0DTE premiums are typically 3-7% of max_loss
     },
     'QQQ': {
         'underlying': 'QQQ', 'start': '2023-01-01',
@@ -118,9 +118,9 @@ TICKERS_CONFIG = {
         'term_inv_ratio':   1.01,
         'gap_skip_pct':     0.007,
         # Breach-probability / credit-quality filters
-        'max_breach_prob':  0.30,   # stricter — QQQ has fatter tails
+        'max_breach_prob':  0.35,   # P(breach) using intraday sigma (open→close only)
         'rvol_mult':        1.0,
-        'min_credit_risk':  0.12,
+        'min_credit_risk':  0.04,   # 0DTE premiums are typically 3-7% of max_loss
     },
 }
 
@@ -220,6 +220,11 @@ def select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today, cfg, sig=No
     vix_sigma      = (vix_today / 100.0) / math.sqrt(252)
     rvol5_daily    = sig.get('rvol5', vix_sigma)
     eff_sigma      = max(vix_sigma, rvol5_daily * cfg.get('rvol_mult', 1.0))
+    # 0DTE is placed at open and expires at close; overnight gap already realized.
+    # ~65% of daily variance occurs during the 6.5h session, so breach probability
+    # should use intraday sigma only.  Strike placement still uses full vix_sigma.
+    INTRADAY_VOL_FRAC   = 0.65
+    intraday_eff_sigma  = eff_sigma * math.sqrt(INTRADAY_VOL_FRAC)
     max_bp         = cfg.get('max_breach_prob', 1.0)
     min_cr         = cfg.get('min_credit_risk', 0.0)
 
@@ -232,9 +237,9 @@ def select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today, cfg, sig=No
 
     for n_short in cfg['n_short_sigma']:
         short_w = n_short * vix_sigma   # distance to short strike as fraction of spot
-        # Breach probability using effective sigma (realised vs implied)
-        n_eff_call = short_w / eff_sigma
-        n_eff_put  = short_w / (eff_sigma * put_wing_mult)
+        # Breach probability using intraday effective sigma (open→close only)
+        n_eff_call = short_w / intraday_eff_sigma
+        n_eff_put  = short_w / (intraday_eff_sigma * put_wing_mult)
         p_breach   = norm.sf(n_eff_call) + norm.sf(n_eff_put)
         if p_breach > max_bp:
             continue   # too risky given today's realised vol / implied vol
