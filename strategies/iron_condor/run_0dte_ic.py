@@ -249,8 +249,8 @@ def select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today, cfg, sig=No
             continue
 
         for n_wing in cfg['n_wing_sigma']:
-            klc = nearest_strike(strikes, S_open * (1 + short_w + n_wing * daily_sigma))
-            klp = nearest_strike(strikes, S_open * (1 - short_w - n_wing * daily_sigma * put_wing_mult))
+            klc = nearest_strike(strikes, S_open * (1 + short_w + n_wing * vix_sigma))
+            klp = nearest_strike(strikes, S_open * (1 - short_w - n_wing * vix_sigma * put_wing_mult))
             if klc is None or klp is None or klc <= ksc or klp >= ksp:
                 continue
 
@@ -276,7 +276,7 @@ def select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today, cfg, sig=No
                             scb=scb, spb=spb, lca=lca, lpa=lpa,
                             premium=premium, max_loss=max_loss, rr_ratio=ratio,
                             n_short=n_short, n_wing=n_wing,
-                            daily_sigma_pct=round(daily_sigma * 100, 3),
+                            daily_sigma_pct=round(vix_sigma * 100, 3),
                             put_wing_mult=round(put_wing_mult, 3))
     return best
 
