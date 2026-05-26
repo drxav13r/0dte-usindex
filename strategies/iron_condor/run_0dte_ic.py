@@ -92,15 +92,15 @@ TICKERS_CONFIG = {
         'skew_put_mult_slope': 0.20,
         # Environment gate
         'vrp_zscore_min':  -0.5,
-        'vix_pct_max':      0.80,
+        'vix_pct_max':      0.90,   # loosened: breach-prob gate handles quality
         'vix_spike_ratio':  1.25,
         'vvix_pct_max':     0.85,
         'skew_zscore_max':  1.5,
         'term_inv_ratio':   1.01,
-        'gap_skip_pct':     0.007,
+        'gap_skip_pct':     0.005,  # tighter: skip >0.5% gap (was 0.7%)
         # Breach-probability / credit-quality filters (grid-optimised)
-        'max_breach_prob':  0.30,   # tighter — selects only low-risk setups
-        'rvol_mult':        1.25,   # amplifies realised-vol signal vs implied
+        'max_breach_prob':  0.30,
+        'rvol_mult':        1.25,
         'min_credit_risk':  0.03,
     },
     'QQQ': {
@@ -112,13 +112,13 @@ TICKERS_CONFIG = {
         # Environment gate — stricter for tech/macro sensitivity
         'vrp_zscore_min':  -0.3,
         'vix_pct_max':      0.75,
-        'vix_spike_ratio':  1.20,
+        'vix_spike_ratio':  1.10,   # tighter: filter VIX spikes >10% over 5d
         'vvix_pct_max':     0.80,
         'skew_zscore_max':  1.5,
         'term_inv_ratio':   1.01,
         'gap_skip_pct':     0.007,
         # Breach-probability / credit-quality filters (grid-optimised)
-        'max_breach_prob':  0.25,   # very selective — QQQ fatter tails, low DD
+        'max_breach_prob':  0.25,
         'rvol_mult':        1.25,
         'min_credit_risk':  0.03,
     },
