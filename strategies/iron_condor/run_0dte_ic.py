@@ -367,10 +367,13 @@ def metrics(trades):
                   .round(4).to_dict('index'))
     years = max((t['date'].max() - t['date'].min()).days / 365.25, 1e-6)
     total_pnl = float(t['pnl_usd'].sum())
-    if peak_margin and peak_margin > 0:
+    if peak_margin and peak_margin > 0 and years > 0:
         total_return   = total_pnl / peak_margin
-        cagr_pct       = round(((1 + total_return) ** (1 / years) - 1) * 100, 2)
-        ann_return_pct = round(total_return / years * 100, 2)   # simple (non-compounded)
+        try:
+            cagr_pct = round(((1 + total_return) ** (1 / years) - 1) * 100, 2)
+        except (OverflowError, ValueError):
+            cagr_pct = None
+        ann_return_pct = round(total_return / years * 100, 2)
     else:
         cagr_pct = ann_return_pct = None
 
