@@ -93,15 +93,15 @@ TICKERS_CONFIG = {
         # Environment gate
         'vrp_zscore_min':  -0.5,
         'vix_pct_max':      0.80,
-        'vix_spike_ratio':  1.25,   # >25% relative jump over 5 sessions
+        'vix_spike_ratio':  1.25,
         'vvix_pct_max':     0.85,
         'skew_zscore_max':  1.5,
         'term_inv_ratio':   1.01,
-        'gap_skip_pct':     0.007,  # skip if open gaps >0.7% from prev close
-        # Breach-probability / credit-quality filters
-        'max_breach_prob':  0.40,   # P(breach) using intraday sigma (open→close only)
-        'rvol_mult':        1.0,
-        'min_credit_risk':  0.04,   # 0DTE premiums are typically 3-7% of max_loss
+        'gap_skip_pct':     0.007,
+        # Breach-probability / credit-quality filters (grid-optimised)
+        'max_breach_prob':  0.30,   # tighter — selects only low-risk setups
+        'rvol_mult':        1.25,   # amplifies realised-vol signal vs implied
+        'min_credit_risk':  0.03,
     },
     'QQQ': {
         'underlying': 'QQQ', 'start': '2023-01-01',
@@ -112,15 +112,15 @@ TICKERS_CONFIG = {
         # Environment gate — stricter for tech/macro sensitivity
         'vrp_zscore_min':  -0.3,
         'vix_pct_max':      0.75,
-        'vix_spike_ratio':  1.20,   # stricter: >20% relative VIX jump
+        'vix_spike_ratio':  1.20,
         'vvix_pct_max':     0.80,
         'skew_zscore_max':  1.5,
         'term_inv_ratio':   1.01,
         'gap_skip_pct':     0.007,
-        # Breach-probability / credit-quality filters
-        'max_breach_prob':  0.35,   # P(breach) using intraday sigma (open→close only)
-        'rvol_mult':        1.0,
-        'min_credit_risk':  0.04,   # 0DTE premiums are typically 3-7% of max_loss
+        # Breach-probability / credit-quality filters (grid-optimised)
+        'max_breach_prob':  0.25,   # very selective — QQQ fatter tails, low DD
+        'rvol_mult':        1.25,
+        'min_credit_risk':  0.03,
     },
 }
 
