@@ -32,23 +32,21 @@ MIN_TRADES    = 30
 # 'combo' mode: breach-prob / credit-quality / rvol_mult — all use cached dates
 COMBO_GRIDS = {
     'SPY': {
-        'max_breach_prob': [0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60],
-        'min_credit_risk': [0.02, 0.03, 0.04, 0.05],
+        'max_breach_prob': [0.30, 0.40, 0.50, 0.60, 0.70, 0.80],
+        'min_credit_risk': [0.02, 0.03],
         'rvol_mult':       [0.50, 0.75, 1.00, 1.25],
         'n_short_sigma':   [
-            [1.0, 1.25, 1.5, 1.75, 2.0],          # v3 default
-            [1.25, 1.5, 1.75, 2.0],                # drop tightest
-            [1.0, 1.25, 1.5, 1.75],                # drop widest
+            [1.0, 1.25, 1.5, 1.75, 2.0],
+            [1.0, 1.25, 1.5, 1.75],
         ],
     },
     'QQQ': {
-        'max_breach_prob': [0.25, 0.30, 0.35, 0.40, 0.45, 0.50],
-        'min_credit_risk': [0.02, 0.03, 0.04, 0.05],
+        'max_breach_prob': [0.25, 0.35, 0.45, 0.55, 0.65, 0.75],
+        'min_credit_risk': [0.02, 0.03],
         'rvol_mult':       [0.50, 0.75, 1.00, 1.25],
         'n_short_sigma':   [
-            [1.25, 1.5, 1.75, 2.0, 2.25],          # v3 default
-            [1.5, 1.75, 2.0, 2.25],                # drop tightest
-            [1.25, 1.5, 1.75, 2.0],                # drop widest
+            [1.25, 1.5, 1.75, 2.0, 2.25],
+            [1.25, 1.5, 1.75, 2.0],
         ],
     },
 }
@@ -231,6 +229,9 @@ def main():
     parser.add_argument('--mode',        choices=['combo', 'gate'], default='combo',
                         help='"combo": breach-prob/credit/rvol params (uses cached dates). '
                              '"gate": env-gate params (requires wide-gate cache).')
+    parser.add_argument('--sort',        default='sharpe',
+                        choices=['sharpe', 'cagr_pct', 'trades', 'total_pnl'],
+                        help='Metric to rank results by (default: sharpe)')
     parser.add_argument('--tickers', nargs='+', default=['SPY', 'QQQ'])
     args = parser.parse_args()
 
@@ -267,8 +268,8 @@ def main():
             print(f'  No valid combinations for {ticker}', flush=True)
             continue
 
-        df = pd.DataFrame(rows).sort_values('sharpe', ascending=False)
-        print(f'\n--- Top {args.top} for {ticker} (Sharpe, min {args.min_trades} trades) ---')
+        df = pd.DataFrame(rows).sort_values(args.sort, ascending=False)
+        print(f'\n--- Top {args.top} for {ticker} (by {args.sort}, min {args.min_trades} trades) ---')
         pd.set_option('display.width', 200)
         pd.set_option('display.max_columns', 20)
         print(df.head(args.top).to_string(index=False))

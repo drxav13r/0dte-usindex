@@ -87,17 +87,22 @@ TICKERS_CONFIG = {
     'SPY': {
         'underlying': 'SPY', 'start': '2023-01-01',
         'n_short_sigma': [1.0, 1.25, 1.5, 1.75, 2.0],
-        'n_wing_sigma':  [0.5, 0.75, 1.0, 1.25],
+        # Adaptive wings: calm regime uses tight wings (low peak_margin → high CAGR)
+        # elevated regime widens protection (lower per-trade loss → lower DD)
+        # Calm = VIX_pct < wing_calm_vix_pct AND rvol5 < vix_sigma
+        'n_wing_sigma':       [0.75, 1.0],  # elevated: wider protection
+        'n_wing_sigma_calm':  [0.5],        # calm: tightest → min peak_margin
+        'wing_calm_vix_pct':  0.50,         # split at VIX 252d median
         'skew_put_mult_max':   1.30,
         'skew_put_mult_slope': 0.20,
         # Environment gate
         'vrp_zscore_min':  -0.5,
-        'vix_pct_max':      0.90,   # loosened: breach-prob gate handles quality
+        'vix_pct_max':      0.90,
         'vix_spike_ratio':  1.25,
         'vvix_pct_max':     0.85,
         'skew_zscore_max':  1.5,
         'term_inv_ratio':   1.01,
-        'gap_skip_pct':     0.005,  # tighter: skip >0.5% gap (was 0.7%)
+        'gap_skip_pct':     0.005,
         # Breach-probability / credit-quality filters (grid-optimised)
         'max_breach_prob':  0.30,
         'rvol_mult':        1.25,
@@ -106,13 +111,16 @@ TICKERS_CONFIG = {
     'QQQ': {
         'underlying': 'QQQ', 'start': '2023-01-01',
         'n_short_sigma': [1.25, 1.5, 1.75, 2.0, 2.25],
-        'n_wing_sigma':  [0.75, 1.0, 1.25, 1.5],
+        # Adaptive wings
+        'n_wing_sigma':       [1.0, 1.25],  # elevated
+        'n_wing_sigma_calm':  [0.75],       # calm: tighter → lower peak_margin
+        'wing_calm_vix_pct':  0.50,
         'skew_put_mult_max':   1.40,
         'skew_put_mult_slope': 0.25,
         # Environment gate — stricter for tech/macro sensitivity
         'vrp_zscore_min':  -0.3,
         'vix_pct_max':      0.75,
-        'vix_spike_ratio':  1.10,   # tighter: filter VIX spikes >10% over 5d
+        'vix_spike_ratio':  1.10,
         'vvix_pct_max':     0.80,
         'skew_zscore_max':  1.5,
         'term_inv_ratio':   1.01,
@@ -220,9 +228,7 @@ def select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today, cfg, sig=No
     vix_sigma      = (vix_today / 100.0) / math.sqrt(252)
     rvol5_daily    = sig.get('rvol5', vix_sigma)
     eff_sigma      = max(vix_sigma, rvol5_daily * cfg.get('rvol_mult', 1.0))
-    # 0DTE is placed at open and expires at close; overnight gap already realized.
-    # ~65% of daily variance occurs during the 6.5h session, so breach probability
-    # should use intraday sigma only.  Strike placement still uses full vix_sigma.
+    # 0DTE breach probability uses intraday sigma only (open→close, ~65% of daily var)
     INTRADAY_VOL_FRAC   = 0.65
     intraday_eff_sigma  = eff_sigma * math.sqrt(INTRADAY_VOL_FRAC)
     max_bp         = cfg.get('max_breach_prob', 1.0)
@@ -231,6 +237,18 @@ def select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today, cfg, sig=No
     skew_z_clamped = max(0.0, min(skew_z_today or 0.0, 1.5))
     put_wing_mult  = min(cfg['skew_put_mult_max'],
                          1.0 + cfg['skew_put_mult_slope'] * skew_z_clamped)
+
+    # Adaptive wing grid: calm regime → tight wings (lower peak_margin, higher CAGR)
+    #                     elevated regime → wider protection (lower per-trade loss, lower DD)
+    # Calm = VIX percentile below threshold AND realized vol below implied
+    vix_pct_sig = sig.get('vix_pct')
+    calm_vix_threshold = cfg.get('wing_calm_vix_pct', 0.50)
+    is_calm = (
+        (vix_pct_sig is None or vix_pct_sig < calm_vix_threshold) and
+        rvol5_daily < vix_sigma  # realised vol below implied
+    )
+    wing_grid = (cfg.get('n_wing_sigma_calm') or cfg['n_wing_sigma']) if is_calm \
+                else cfg['n_wing_sigma']
 
     best       = None
     best_ratio = -np.inf
@@ -253,7 +271,7 @@ def select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today, cfg, sig=No
         if np.isnan(scb) or np.isnan(spb) or scb <= 0 or spb <= 0:
             continue
 
-        for n_wing in cfg['n_wing_sigma']:
+        for n_wing in wing_grid:
             klc = nearest_strike(strikes, S_open * (1 + short_w + n_wing * vix_sigma))
             klp = nearest_strike(strikes, S_open * (1 - short_w - n_wing * vix_sigma * put_wing_mult))
             if klc is None or klp is None or klc <= ksc or klp >= ksp:
@@ -282,7 +300,8 @@ def select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today, cfg, sig=No
                             premium=premium, max_loss=max_loss, rr_ratio=ratio,
                             n_short=n_short, n_wing=n_wing,
                             daily_sigma_pct=round(vix_sigma * 100, 3),
-                            put_wing_mult=round(put_wing_mult, 3))
+                            put_wing_mult=round(put_wing_mult, 3),
+                            wing_regime='calm' if is_calm else 'elevated')
     return best
 
 
@@ -596,7 +615,8 @@ def main():
     fields = ['ticker', 'date', 'traded', 'reason', 'pnl_usd', 'won',
               'max_loss_usd', 'S_open', 'S_close', 'premium', 'close_cost',
               'ksc', 'ksp', 'klc', 'klp',
-              'n_short', 'n_wing', 'daily_sigma_pct', 'put_wing_mult', 'rr_ratio', 'source']
+              'n_short', 'n_wing', 'daily_sigma_pct', 'put_wing_mult', 'rr_ratio',
+              'wing_regime', 'source']
     trades_path = out / 'trades.csv'
     with trades_path.open('w', newline='') as f:
         csv.DictWriter(f, fieldnames=fields, extrasaction='ignore').writeheader()
