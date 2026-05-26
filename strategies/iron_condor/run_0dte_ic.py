@@ -51,6 +51,7 @@ import urllib.request, urllib.error
 
 import pandas as pd
 import numpy as np
+from scipy.stats import norm
 
 try:
     import yfinance as yf
@@ -61,47 +62,65 @@ except ImportError as e:
 THETA_BASE = 'http://127.0.0.1:25503/v3'
 
 # ── Per-ticker configuration ─────────────────────────────────────────────────
-# underlying        : yfinance symbol for open/close price used in strike sizing
-# start             : first date with confirmed full Mon-Fri 0DTE expirations
-# n_short_sigma     : grid of short-strike distances (× daily 1-sigma)
-# n_wing_sigma      : grid of wing widths (× daily 1-sigma)
-# skew_put_mult_max : max put-wing widening multiplier (SKEW asymmetry)
-# skew_put_mult_slope: slope of put-wing mult vs SKEW z-score
+# underlying          : yfinance symbol for open/close price used in strike sizing
+# start               : first date with confirmed full Mon-Fri 0DTE expirations
+# n_short_sigma       : candidate short-strike distances (× daily 1-sigma)
+# n_wing_sigma        : candidate wing widths (× daily 1-sigma)
+# skew_put_mult_max   : max put-wing widening multiplier (SKEW asymmetry)
+# skew_put_mult_slope : slope of put-wing mult vs SKEW z-score
+#
 # Gate thresholds — any one triggered skips the day:
-#   vrp_zscore_min  : VRP z-score below this → premium too cheap
-#   vix_pct_max     : VIX 252d %-rank above this → extreme fear
-#   vvix_pct_max    : VVIX 252d %-rank above this → vol-of-vol spike
-#   skew_zscore_max : SKEW z-score above this → extreme tail-put demand
-#   term_inv_ratio  : VIX9D / VIX above this → inverted near-term structure
+#   vrp_zscore_min    : VRP z-score < this → vol too cheap vs realised
+#   vix_pct_max       : VIX 252d %-rank > this → extreme fear regime
+#   vix_spike_ratio   : VIX / VIX[5d ago] > this → rapid vol spike (relative)
+#   vvix_pct_max      : VVIX 252d %-rank > this → vol-of-vol spike
+#   skew_zscore_max   : SKEW z-score > this → extreme tail-put demand
+#   term_inv_ratio    : VIX9D / VIX > this → inverted near-term structure
+#   gap_skip_pct      : |open/prev_close - 1| > this → large opening gap
+#
+# Strike-level filters (applied inside select_best_combo per n_short candidate):
+#   max_breach_prob   : skip n_short if P(breach) > this using effective sigma
+#                       effective_sigma = max(vix_implied, rvol5_daily × rvol_mult)
+#   rvol_mult         : realized-vol multiplier for effective sigma
+#   min_credit_risk   : skip combo if premium/max_loss < this (quality filter)
 TICKERS_CONFIG = {
     'SPY': {
         'underlying': 'SPY', 'start': '2023-01-01',
-        # Wings: standard sigma grid
         'n_short_sigma': [1.0, 1.25, 1.5, 1.75, 2.0],
         'n_wing_sigma':  [0.5, 0.75, 1.0, 1.25],
         'skew_put_mult_max':   1.30,
         'skew_put_mult_slope': 0.20,
-        # Gate: standard thresholds
+        # Environment gate
         'vrp_zscore_min':  -0.5,
         'vix_pct_max':      0.80,
+        'vix_spike_ratio':  1.25,   # >25% relative jump over 5 sessions
         'vvix_pct_max':     0.85,
         'skew_zscore_max':  1.5,
         'term_inv_ratio':   1.01,
+        'gap_skip_pct':     0.007,  # skip if open gaps >0.7% from prev close
+        # Breach-probability / credit-quality filters
+        'max_breach_prob':  0.35,   # P(either short struck touched) < 35%
+        'rvol_mult':        1.0,    # effective_sigma = max(vix_sigma, rvol5 × 1.0)
+        'min_credit_risk':  0.12,   # premium must be ≥12% of max_loss
     },
     'QQQ': {
         'underlying': 'QQQ', 'start': '2023-01-01',
-        # Wings: start wider — QQQ realised vol is ~30% higher than SPY;
-        # wider short strikes avoid being touched by routine daily swings
         'n_short_sigma': [1.25, 1.5, 1.75, 2.0, 2.25],
         'n_wing_sigma':  [0.75, 1.0, 1.25, 1.5],
-        'skew_put_mult_max':   1.40,   # more downside protection for tech skew
+        'skew_put_mult_max':   1.40,
         'skew_put_mult_slope': 0.25,
-        # Gate: stricter — QQQ is more sensitive to macro/rate stress
+        # Environment gate — stricter for tech/macro sensitivity
         'vrp_zscore_min':  -0.3,
         'vix_pct_max':      0.75,
+        'vix_spike_ratio':  1.20,   # stricter: >20% relative VIX jump
         'vvix_pct_max':     0.80,
         'skew_zscore_max':  1.5,
         'term_inv_ratio':   1.01,
+        'gap_skip_pct':     0.007,
+        # Breach-probability / credit-quality filters
+        'max_breach_prob':  0.30,   # stricter — QQQ has fatter tails
+        'rvol_mult':        1.0,
+        'min_credit_risk':  0.12,
     },
 }
 
@@ -184,14 +203,26 @@ def nearest_strike(arr, target):
 
 # ── Strike selection ──────────────────────────────────────────────────────────
 
-def select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today, cfg):
+def select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today, cfg, sig=None):
     """
-    Scan cfg['n_short_sigma'] × cfg['n_wing_sigma'] grid with sigma-scaled targets.
-    Short strikes at n_short × daily_sigma OTM; long legs an additional
-    n_wing × daily_sigma (put side widened by skew multiplier).
-    Returns combo with best premium / max_loss, or None.
+    Scan cfg['n_short_sigma'] × cfg['n_wing_sigma'] grid.
+
+    Each n_short candidate is pre-screened by breach probability:
+      P(breach) = P(call struck) + P(put struck)
+               = norm.sf(n_eff_call) + norm.sf(n_eff_put / put_wing_mult)
+    where effective_sigma = max(vix_implied, rvol5 × rvol_mult) blends implied
+    and realised vol.  n_eff = short_w / effective_sigma in sigma units.
+
+    Combos with premium/max_loss < min_credit_risk are also rejected.
+    Returns combo with best premium/max_loss, or None.
     """
-    daily_sigma    = (vix_today / 100.0) / math.sqrt(252)
+    sig            = sig or {}
+    vix_sigma      = (vix_today / 100.0) / math.sqrt(252)
+    rvol5_daily    = sig.get('rvol5', vix_sigma)
+    eff_sigma      = max(vix_sigma, rvol5_daily * cfg.get('rvol_mult', 1.0))
+    max_bp         = cfg.get('max_breach_prob', 1.0)
+    min_cr         = cfg.get('min_credit_risk', 0.0)
+
     skew_z_clamped = max(0.0, min(skew_z_today or 0.0, 1.5))
     put_wing_mult  = min(cfg['skew_put_mult_max'],
                          1.0 + cfg['skew_put_mult_slope'] * skew_z_clamped)
@@ -200,7 +231,13 @@ def select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today, cfg):
     best_ratio = -np.inf
 
     for n_short in cfg['n_short_sigma']:
-        short_w = n_short * daily_sigma
+        short_w = n_short * vix_sigma   # distance to short strike as fraction of spot
+        # Breach probability using effective sigma (realised vs implied)
+        n_eff_call = short_w / eff_sigma
+        n_eff_put  = short_w / (eff_sigma * put_wing_mult)
+        p_breach   = norm.sf(n_eff_call) + norm.sf(n_eff_put)
+        if p_breach > max_bp:
+            continue   # too risky given today's realised vol / implied vol
         ksc = nearest_strike(strikes, S_open * (1 + short_w))
         ksp = nearest_strike(strikes, S_open * (1 - short_w))
         if ksc is None or ksp is None or ksc <= S_open or ksp >= S_open:
@@ -229,6 +266,8 @@ def select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today, cfg):
             max_loss = spread_w - premium
             if max_loss <= 0:
                 continue
+            if premium / max_loss < min_cr:
+                continue   # credit too small relative to risk
 
             ratio = premium / max_loss
             if ratio > best_ratio:
@@ -244,7 +283,7 @@ def select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today, cfg):
 
 # ── Per-day trade execution ───────────────────────────────────────────────────
 
-def run_one(symbol, dt, S_open, S_close, vix_today, skew_z_today, cache_dir, cfg):
+def run_one(symbol, dt, S_open, S_close, vix_today, skew_z_today, cache_dir, cfg, sig=None):
     df, src = fetch_quote_history(symbol, dt, cache_dir)
     if df is None or df.empty:
         return {'ticker': symbol, 'date': dt, 'traded': False, 'reason': src, 'pnl_usd': 0.0}
@@ -256,7 +295,7 @@ def run_one(symbol, dt, S_open, S_close, vix_today, skew_z_today, cache_dir, cfg
 
     lkp     = build_quote_lookup(df)
     strikes = np.sort(df['strike'].dropna().astype(float).unique())
-    best    = select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today, cfg)
+    best    = select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today, cfg, sig=sig)
 
     if best is None:
         return {'ticker': symbol, 'date': dt, 'traded': False, 'reason': 'no_valid_combo', 'pnl_usd': 0.0}
@@ -413,11 +452,12 @@ def compute_gate_signals(all_dates, spx_close, vix, vix9d, vvix, skew):
     def pct_rank(s, w=252):
         return s.rolling(w, min_periods=20).rank(pct=True)
 
-    vrp_z    = zscore(vrp)
-    vix_pct  = pct_rank(vix_a)
-    vvix_pct = pct_rank(vvix_a)
-    skew_z   = zscore(skew_a)
-    term_inv = (vix9d_a / (vix_a + 1e-9))   # ratio; threshold applied per-ticker
+    vrp_z       = zscore(vrp)
+    vix_pct     = pct_rank(vix_a)
+    vvix_pct    = pct_rank(vvix_a)
+    skew_z      = zscore(skew_a)
+    term_inv    = (vix9d_a / (vix_a + 1e-9))           # ratio; threshold applied per-ticker
+    vix_5d_ratio = vix_a / (vix_a.shift(5) + 1e-9)    # relative 5-session VIX change
 
     signals = {}
     for ts in idx:
@@ -428,24 +468,38 @@ def compute_gate_signals(all_dates, spx_close, vix, vix9d, vvix, skew):
             return None if pd.isna(val) else float(val)
 
         signals[d_str] = {
-            'vrp_z':    get(vrp_z),
-            'vix_pct':  get(vix_pct),
-            'vvix_pct': get(vvix_pct),
-            'skew_z':   get(skew_z),
+            'vrp_z':          get(vrp_z),
+            'vix_pct':        get(vix_pct),
+            'vix_5d_ratio':   get(vix_5d_ratio),
+            'vvix_pct':       get(vvix_pct),
+            'skew_z':         get(skew_z),
             'term_inv_ratio': get(term_inv),
-            'vix':      get(vix_a) or 20.0,
+            'vix':            get(vix_a) or 20.0,
         }
     return signals
 
 
 def apply_gate(sig, cfg):
-    """Apply per-ticker gate thresholds to a signal dict. Returns (skip, reason_str)."""
+    """Apply per-ticker gate thresholds to a signal dict. Returns (skip, reason_str).
+
+    Environment signals (computed once for all dates, macro-level):
+      vrp_low       : IV−RV premium too cheap
+      vix_high      : VIX extreme %-rank
+      vix_spike     : VIX jumped >X% relative to 5 sessions ago
+      vvix_high     : vol-of-vol spike
+      skew_extreme  : tail-put demand extreme
+      term_inv      : near-term term structure inverted
+    Intraday signals (per-ticker, injected by main loop each day):
+      gap           : opening gap too large vs previous close
+    """
     reasons = []
-    vz  = sig.get('vrp_z');         vz  is not None and vz  < cfg['vrp_zscore_min']  and reasons.append('vrp_low')
-    vp  = sig.get('vix_pct');       vp  is not None and vp  > cfg['vix_pct_max']     and reasons.append('vix_high')
-    vvp = sig.get('vvix_pct');      vvp is not None and vvp > cfg['vvix_pct_max']    and reasons.append('vvix_high')
-    sz  = sig.get('skew_z');        sz  is not None and sz  > cfg['skew_zscore_max'] and reasons.append('skew_extreme')
-    ti  = sig.get('term_inv_ratio'); ti  is not None and ti  > cfg['term_inv_ratio'] and reasons.append('term_inv')
+    vz  = sig.get('vrp_z');          vz  is not None and vz  < cfg['vrp_zscore_min']   and reasons.append('vrp_low')
+    vp  = sig.get('vix_pct');        vp  is not None and vp  > cfg['vix_pct_max']      and reasons.append('vix_high')
+    vsr = sig.get('vix_5d_ratio');   vsr is not None and vsr > cfg['vix_spike_ratio']  and reasons.append('vix_spike')
+    vvp = sig.get('vvix_pct');       vvp is not None and vvp > cfg['vvix_pct_max']     and reasons.append('vvix_high')
+    sz  = sig.get('skew_z');         sz  is not None and sz  > cfg['skew_zscore_max']  and reasons.append('skew_extreme')
+    ti  = sig.get('term_inv_ratio'); ti  is not None and ti  > cfg['term_inv_ratio']   and reasons.append('term_inv')
+    gp  = sig.get('gap_pct');        gp  is not None and abs(gp) > cfg['gap_skip_pct'] and reasons.append('gap')
     return bool(reasons), ','.join(reasons)
 
 
@@ -498,11 +552,37 @@ def main():
 
     signals = compute_gate_signals(all_dates, spx_close, vix, vix9d, vvix, skew)
 
+    # ── Per-underlying: RVOL5 (5-day rolling daily sigma) and prev-close ────────
+    # Used in breach-probability calc and gap gate inside apply_gate.
+    close_by_sym = {
+        sym: pd.Series({d: c for d, (o, c) in dates.items()}).sort_index()
+        for sym, dates in px.items()
+    }
+    rvol5_by_sym = {
+        sym: np.log(s / s.shift(1)).rolling(5, min_periods=3).std()
+        for sym, s in close_by_sym.items()
+    }
+    # Map date_str → rvol5 daily sigma per underlying
+    rvol5_lookup = {
+        sym: {
+            pd.Timestamp(ts).strftime('%Y-%m-%d'): float(v)
+            for ts, v in rv.items() if pd.notna(v)
+        }
+        for sym, rv in rvol5_by_sym.items()
+    }
+    # Map date_str → prev-close per underlying
+    prev_close_lookup = {
+        sym: {
+            pd.Timestamp(ts).strftime('%Y-%m-%d'): float(s.iloc[i - 1])
+            for i, ts in enumerate(s.index) if i > 0
+        }
+        for sym, s in close_by_sym.items()
+    }
+
     trade_dates = [d for d in all_dates if d >= earliest_start]
-    # gate count is informational — use SPY thresholds as reference
     ref_cfg = next(iter(active.values()))
     gated = sum(1 for d in trade_dates if apply_gate(signals.get(d, {}), ref_cfg)[0])
-    log(f'Trade-eligible dates: {len(trade_dates)}, gated out (SPY ref): {gated}')
+    log(f'Trade-eligible dates: {len(trade_dates)}, gated out (SPY ref, env only): {gated}')
 
     fields = ['ticker', 'date', 'traded', 'reason', 'pnl_usd', 'won',
               'max_loss_usd', 'S_open', 'S_close', 'premium', 'close_cost',
@@ -514,9 +594,9 @@ def main():
 
     all_rows = []
     for i, dt in enumerate(trade_dates, 1):
-        sig = signals.get(dt, {})
-        vix_today   = sig.get('vix', 20.0)
-        skew_z_today = sig.get('skew_z') or 0.0
+        base_sig     = signals.get(dt, {})
+        vix_today    = base_sig.get('vix', 20.0)
+        skew_z_today = base_sig.get('skew_z') or 0.0
 
         for sym, cfg in active.items():
             if dt < ticker_starts[sym]:
@@ -527,13 +607,23 @@ def main():
                                  'reason': 'no_underlying_px', 'pnl_usd': 0.0})
                 continue
             S_open, S_close = prices
+            und = cfg['underlying']
+
+            # Inject per-ticker intraday signals into a copy of base_sig
+            prev_c = prev_close_lookup.get(und, {}).get(dt)
+            gap_pct = (S_open / prev_c - 1.0) if prev_c else 0.0
+            rvol5   = rvol5_lookup.get(und, {}).get(dt)
+            sig = {**base_sig,
+                   'gap_pct': gap_pct,
+                   'rvol5':   rvol5 if rvol5 is not None else vix_today / 100 / math.sqrt(252)}
+
             skip, reason = apply_gate(sig, cfg)
             if skip:
                 all_rows.append({'ticker': sym, 'date': dt, 'traded': False,
                                  'reason': f'gate:{reason}', 'pnl_usd': 0.0})
             else:
                 all_rows.append(run_one(sym, dt, S_open, S_close,
-                                        vix_today, skew_z_today, cache_dir, cfg))
+                                        vix_today, skew_z_today, cache_dir, cfg, sig=sig))
 
         if i % 10 == 0:
             pd.DataFrame(all_rows).to_csv(trades_path, index=False)
