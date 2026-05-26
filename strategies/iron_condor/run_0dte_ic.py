@@ -107,6 +107,10 @@ TICKERS_CONFIG = {
         'max_breach_prob':  0.30,
         'rvol_mult':        1.25,
         'min_credit_risk':  0.03,
+        # Risk-budget sizing: target fixed max_loss_usd per trade so peak_margin
+        # ≈ 2×cap (both tickers on same day) instead of being VIX-driven (~$1.9M).
+        # Lower cap → smaller denominator → higher CAGR.  Set None to use legacy sizing.
+        'max_loss_usd_cap': 400_000,
     },
     'QQQ': {
         'underlying': 'QQQ', 'start': '2023-01-01',
@@ -129,6 +133,7 @@ TICKERS_CONFIG = {
         'max_breach_prob':  0.25,
         'rvol_mult':        1.25,
         'min_credit_risk':  0.03,
+        'max_loss_usd_cap': 400_000,
     },
 }
 
@@ -336,7 +341,16 @@ def run_one(symbol, dt, S_open, S_close, vix_today, skew_z_today, cache_dir, cfg
 
     close_cost   = (sca_x + spa_x) - (lcb_x + lpb_x)
     pnl_pc       = max(best['premium'] - close_cost, -best['max_loss'])
-    n_c          = CAPITAL_PER_TICKER_DAY / (S_open * 0.01)
+    # Dynamic position sizing: if max_loss_usd_cap is configured, back-solve n_c so
+    # that max_loss_usd ≤ cap on every trade.  This keeps peak_margin ≈ 2×cap
+    # regardless of the VIX regime, unlocking higher CAGR from a smaller denominator.
+    # Without a cap, n_c = CAPITAL / (spot × 1%) and peak_margin is set by the
+    # highest-VIX day we trade (~$1.9M currently).
+    ml_cap = cfg.get('max_loss_usd_cap')
+    if ml_cap and best['max_loss'] > 0:
+        n_c = ml_cap / (best['max_loss'] * 100)
+    else:
+        n_c = CAPITAL_PER_TICKER_DAY / (S_open * 0.01)
     pnl_usd      = float(pnl_pc * n_c * 100)
     max_loss_usd = float(best['max_loss'] * n_c * 100)   # margin required for this position
 
