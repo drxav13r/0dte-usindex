@@ -61,79 +61,118 @@ except ImportError as e:
 # ── Theta Data local terminal ────────────────────────────────────────────────
 THETA_BASE = 'http://127.0.0.1:25503/v3'
 
+# ── Macro event calendar ─────────────────────────────────────────────────────
+_MACRO_CSV = Path(__file__).parent.parent.parent / 'data' / 'macro_events.csv'
+
+def load_macro_skip_dates(csv_path: Path = _MACRO_CSV) -> set:
+    """Return set of date strings (YYYY-MM-DD) that should be skipped.
+
+    Loads data/macro_events.csv; skips rows where skip_dte != '1'.
+    Falls back to empty set if file is missing (no crash).
+    """
+    if not csv_path.exists():
+        return set()
+    try:
+        df = pd.read_csv(csv_path, parse_dates=['date'])
+        skip = df[df['skip_dte'].astype(str) == '1']['date']
+        return set(skip.dt.strftime('%Y-%m-%d').tolist())
+    except Exception:
+        return set()
+
+MACRO_SKIP_DATES: set = load_macro_skip_dates()
+
 # ── Per-ticker configuration ─────────────────────────────────────────────────
 # underlying          : yfinance symbol for open/close price used in strike sizing
 # start               : first date with confirmed full Mon-Fri 0DTE expirations
 # n_short_sigma       : candidate short-strike distances (× daily 1-sigma)
-# n_wing_sigma        : candidate wing widths (× daily 1-sigma)
+# n_wing_sigma        : candidate wing widths (× daily 1-sigma) — elevated regime
+# n_wing_sigma_calm   : wing widths for calm regime (VIX_pct < wing_calm_vix_pct)
+# wing_calm_vix_pct   : VIX percentile threshold for calm vs elevated regime
 # skew_put_mult_max   : max put-wing widening multiplier (SKEW asymmetry)
 # skew_put_mult_slope : slope of put-wing mult vs SKEW z-score
 #
-# Gate thresholds — any one triggered skips the day:
-#   vrp_zscore_min    : VRP z-score < this → vol too cheap vs realised
-#   vix_pct_max       : VIX 252d %-rank > this → extreme fear regime
-#   vix_spike_ratio   : VIX / VIX[5d ago] > this → rapid vol spike (relative)
-#   vvix_pct_max      : VVIX 252d %-rank > this → vol-of-vol spike
-#   skew_zscore_max   : SKEW z-score > this → extreme tail-put demand
-#   term_inv_ratio    : VIX9D / VIX > this → inverted near-term structure
-#   gap_skip_pct      : |open/prev_close - 1| > this → large opening gap
+# Gate (V9 composite risk score):
+#   risk_score_max    : skip if composite risk score > this (0–1 scale)
+#                       0.25 → ~66% nominal coverage (SPY); 0.20 → ~56% (QQQ/IWM)
+#                       Score weights: vix_5d_ratio (3.0) + term_inv (2.5) +
+#                         rvol5_ratio (2.0) + vvix_pct (1.5) + vix_pct (1.0) +
+#                         vrp_cheapness (0.8) − skew_protection (0.5)
+#   gap_skip_pct      : hard gate — |open/prev_close - 1| > this → skip
+#   min_sigma_pct     : hard gate — VIX/sqrt(252) < this → skip (low-IV trap guard)
+#                       Blocks low-IV days where realized vol routinely exceeds implied.
+#                       The max-DD day (2024-07-02, sigma=0.758) would be blocked here.
 #
-# Strike-level filters (applied inside select_best_combo per n_short candidate):
+# Strike-level filters:
 #   max_breach_prob   : skip n_short if P(breach) > this using effective sigma
-#                       effective_sigma = max(vix_implied, rvol5_daily × rvol_mult)
 #   rvol_mult         : realized-vol multiplier for effective sigma
-#   min_credit_risk   : skip combo if premium/max_loss < this (quality filter)
+#   min_credit_risk   : skip combo if premium/max_loss < this
+#   max_loss_usd_cap  : target fixed max_loss_usd per trade (risk-budget sizing)
 TICKERS_CONFIG = {
     'SPY': {
         'underlying': 'SPY', 'start': '2023-01-01',
         'n_short_sigma': [1.0, 1.25, 1.5, 1.75, 2.0],
-        # Adaptive wings: calm regime uses tight wings (low peak_margin → high CAGR)
-        # elevated regime widens protection (lower per-trade loss → lower DD)
-        # Calm = VIX_pct < wing_calm_vix_pct AND rvol5 < vix_sigma
-        'n_wing_sigma':       [0.75, 1.0],  # elevated: wider protection
-        'n_wing_sigma_calm':  [0.5],        # calm: tightest → min peak_margin
-        'wing_calm_vix_pct':  0.50,         # split at VIX 252d median
+        'n_wing_sigma':       [0.75, 1.0],
+        'n_wing_sigma_calm':  [0.5],
+        'wing_calm_vix_pct':  0.50,
         'skew_put_mult_max':   1.30,
         'skew_put_mult_slope': 0.20,
-        # Environment gate
-        'vrp_zscore_min':  -0.5,
-        'vix_pct_max':      0.90,
-        'vix_spike_ratio':  1.25,
-        'vvix_pct_max':     0.85,
-        'skew_zscore_max':  1.5,
-        'term_inv_ratio':   1.01,
-        'gap_skip_pct':     0.005,
-        # Breach-probability / credit-quality filters (grid-optimised)
+        # V9 composite gate
+        'risk_score_max':   0.25,
+        'gap_skip_pct':     0.010,
+        'min_sigma_pct':    0.85,
+        # Strike-level filters
         'max_breach_prob':  0.30,
         'rvol_mult':        1.25,
         'min_credit_risk':  0.03,
-        # Risk-budget sizing: target fixed max_loss_usd per trade so peak_margin
-        # ≈ 2×cap (both tickers on same day) instead of being VIX-driven (~$1.9M).
-        # Lower cap → smaller denominator → higher CAGR.  Set None to use legacy sizing.
         'max_loss_usd_cap': 400_000,
+        # Tiered sizing: n_short=1.0 only on low-risk days at reduced cap
+        'tight_n_short':        1.0,
+        'tight_risk_score_max': 0.15,
+        'tight_cap':            100_000,
     },
     'QQQ': {
         'underlying': 'QQQ', 'start': '2023-01-01',
-        'n_short_sigma': [1.25, 1.5, 1.75, 2.0, 2.25],
-        # Adaptive wings
-        'n_wing_sigma':       [1.0, 1.25],  # elevated
-        'n_wing_sigma_calm':  [0.75],       # calm: tighter → lower peak_margin
+        'n_short_sigma': [1.0, 1.25, 1.5, 1.75, 2.0, 2.25],
+        'n_wing_sigma':       [1.0, 1.25],
+        'n_wing_sigma_calm':  [0.75],
         'wing_calm_vix_pct':  0.50,
         'skew_put_mult_max':   1.40,
         'skew_put_mult_slope': 0.25,
-        # Environment gate — stricter for tech/macro sensitivity
-        'vrp_zscore_min':  -0.3,
-        'vix_pct_max':      0.75,
-        'vix_spike_ratio':  1.10,
-        'vvix_pct_max':     0.80,
-        'skew_zscore_max':  1.5,
-        'term_inv_ratio':   1.01,
-        'gap_skip_pct':     0.007,
-        # Breach-probability / credit-quality filters (grid-optimised)
+        # V9 composite gate — slightly stricter for QQQ's higher vol sensitivity
+        'risk_score_max':   0.20,
+        'gap_skip_pct':     0.010,
+        'min_sigma_pct':    0.85,
+        # Strike-level filters
         'max_breach_prob':  0.25,
         'rvol_mult':        1.25,
         'min_credit_risk':  0.03,
         'max_loss_usd_cap': 400_000,
+        # Tiered sizing: n_short=1.0 only on low-risk days at reduced cap
+        'tight_n_short':        1.0,
+        'tight_risk_score_max': 0.12,
+        'tight_cap':            100_000,
+    },
+    'IWM': {
+        'underlying': 'IWM', 'start': '2023-01-01',
+        'n_short_sigma': [1.0, 1.25, 1.5, 1.75, 2.0],
+        'n_wing_sigma':       [1.0, 1.25],
+        'n_wing_sigma_calm':  [0.75],
+        'wing_calm_vix_pct':  0.50,
+        'skew_put_mult_max':   1.40,
+        'skew_put_mult_slope': 0.25,
+        # V9 composite gate
+        'risk_score_max':   0.20,
+        'gap_skip_pct':     0.010,
+        'min_sigma_pct':    0.85,
+        # Strike-level filters
+        'max_breach_prob':  0.25,
+        'rvol_mult':        1.25,
+        'min_credit_risk':  0.03,
+        'max_loss_usd_cap': 400_000,
+        # Tiered sizing: n_short=1.0 only on low-risk days at reduced cap
+        'tight_n_short':        1.0,
+        'tight_risk_score_max': 0.12,
+        'tight_cap':            100_000,
     },
 }
 
@@ -255,10 +294,17 @@ def select_best_combo(lkp, strikes, S_open, vix_today, skew_z_today, cfg, sig=No
     wing_grid = (cfg.get('n_wing_sigma_calm') or cfg['n_wing_sigma']) if is_calm \
                 else cfg['n_wing_sigma']
 
+    tight_ns  = cfg.get('tight_n_short', -1.0)
+    tight_rsc = cfg.get('tight_risk_score_max', 1.0)
+    rs_today  = (sig or {}).get('risk_score', 0.0)
+
     best       = None
     best_ratio = -np.inf
 
     for n_short in cfg['n_short_sigma']:
+        # Tight-strike gate: only allow n_short ≤ tight_n_short on genuinely calm days
+        if n_short <= tight_ns and rs_today > tight_rsc:
+            continue
         short_w = n_short * vix_sigma   # distance to short strike as fraction of spot
         # Breach probability using intraday effective sigma (open→close only)
         n_eff_call = short_w / intraday_eff_sigma
@@ -346,7 +392,14 @@ def run_one(symbol, dt, S_open, S_close, vix_today, skew_z_today, cache_dir, cfg
     # regardless of the VIX regime, unlocking higher CAGR from a smaller denominator.
     # Without a cap, n_c = CAPITAL / (spot × 1%) and peak_margin is set by the
     # highest-VIX day we trade (~$1.9M currently).
-    ml_cap = cfg.get('max_loss_usd_cap')
+    # Tiered sizing: tight strikes (n_short ≤ tight_n_short) get a smaller cap
+    # to limit max single-trade loss when the IC is closer to ATM.
+    tight_ns  = cfg.get('tight_n_short', -1.0)
+    tight_cap = cfg.get('tight_cap')
+    if tight_cap and best['n_short'] <= tight_ns:
+        ml_cap = tight_cap
+    else:
+        ml_cap = cfg.get('max_loss_usd_cap')
     if ml_cap and best['max_loss'] > 0:
         n_c = ml_cap / (best['max_loss'] * 100)
     else:
@@ -521,28 +574,86 @@ def compute_gate_signals(all_dates, spx_close, vix, vix9d, vvix, skew):
     return signals
 
 
-def apply_gate(sig, cfg):
-    """Apply per-ticker gate thresholds to a signal dict. Returns (skip, reason_str).
+def _compute_risk_score(sig):
+    """Composite environment risk score for iron condor gating (0–1 scale).
 
-    Environment signals (computed once for all dates, macro-level):
-      vrp_low       : IV−RV premium too cheap
-      vix_high      : VIX extreme %-rank
-      vix_spike     : VIX jumped >X% relative to 5 sessions ago
-      vvix_high     : vol-of-vol spike
-      skew_extreme  : tail-put demand extreme
-      term_inv      : near-term term structure inverted
-    Intraday signals (per-ticker, injected by main loop each day):
-      gap           : opening gap too large vs previous close
+    HIGH score = dangerous day (regime transition, vol underpriced, inverted term
+    structure) → skip.  LOW score = quiet, premium-rich environment → trade.
+
+    Weights derived from empirical correlation with intraday 1.5-sigma breach
+    across 851 SPY/QQQ trading dates 2023-2026.  vix_5d_ratio is the strongest
+    single predictor (+0.238); skew_z has protective negative weight (−0.032):
+    high SKEW = market already hedged = wings priced wider = less likely to breach.
+    """
+    def _get(k, default=0.0):
+        v = sig.get(k)
+        return default if (v is None or (isinstance(v, float) and math.isnan(v))) else v
+
+    def _clip(x, lo, hi):
+        return max(lo, min(hi, x))
+
+    # VIX momentum: 0 when flat/falling, 1 when VIX up ≥20% vs 5 sessions ago
+    c_vix_5d   = _clip((_get('vix_5d_ratio', 1.0) - 1.0) * 5.0,  0.0, 1.0)
+    # Term structure inversion: 0 = normal (VIX9D ≤ VIX), 1 at ratio ≥ 1.5
+    c_term_inv = _clip((_get('term_inv_ratio', 0.95) - 1.0) / 0.5, 0.0, 1.0)
+    # Realized vol exceeding implied: 0 when rvol5/vix_daily ≤ 0.8, 1 when ≥ 1.4
+    rvol5     = _get('rvol5')
+    vix_level = _get('vix', 20.0)
+    if rvol5 and vix_level > 0:
+        rvol5_ann_pct = rvol5 * math.sqrt(252) * 100
+        rvol5_ratio   = rvol5_ann_pct / vix_level
+    else:
+        rvol5_ratio = 0.7
+    c_rvol5    = _clip((rvol5_ratio - 0.8) / 0.6, 0.0, 1.0)
+    # Vol-of-vol and absolute VIX percentile ranks (passthrough 0–1)
+    c_vvix     = _clip(_get('vvix_pct', 0.5), 0.0, 1.0)
+    c_vix_pct  = _clip(_get('vix_pct',  0.5), 0.0, 1.0)
+    # VRP cheapness: 1 when VRP z-score very negative (vol being sold cheap)
+    c_vrp      = _clip((-_get('vrp_z', 0.0) + 0.5) / 3.0, 0.0, 1.0)
+    # SKEW protection: high SKEW = market already hedged → safer → negative weight
+    c_skew     = _clip(_get('skew_z', 0.0) / 2.0, 0.0, 1.0)
+
+    _MAX_POS = 10.8  # sum of positive weights
+    raw = (3.0 * c_vix_5d + 2.5 * c_term_inv + 2.0 * c_rvol5
+           + 1.5 * c_vvix + 1.0 * c_vix_pct + 0.8 * c_vrp - 0.5 * c_skew)
+    return raw / _MAX_POS
+
+
+def apply_gate(sig, cfg):
+    """Apply per-ticker gate to a signal dict. Returns (skip, reason_str, risk_score).
+
+    Hard gates (absolute trip-wires):
+      macro_event   : date is in MACRO_SKIP_DATES (FOMC, CPI, NFP) — scheduled
+                      announcements cause intraday moves that pre-open signals miss
+      gap_pct       : |open/prev_close - 1| > gap_skip_pct — opening gap days have a
+                      different intraday distribution regardless of other signals
+      min_sigma_pct : VIX/sqrt(252) < threshold — low-IV days where realized vol
+                      frequently exceeds implied (empirical: max-DD on 0.758 sigma day)
+
+    Soft composite gate:
+      risk_score    : _compute_risk_score(sig) > risk_score_max
+                      0.25 → ~66% coverage (SPY); 0.20 → ~56% (QQQ/IWM)
     """
     reasons = []
-    vz  = sig.get('vrp_z');          vz  is not None and vz  < cfg['vrp_zscore_min']   and reasons.append('vrp_low')
-    vp  = sig.get('vix_pct');        vp  is not None and vp  > cfg['vix_pct_max']      and reasons.append('vix_high')
-    vsr = sig.get('vix_5d_ratio');   vsr is not None and vsr > cfg['vix_spike_ratio']  and reasons.append('vix_spike')
-    vvp = sig.get('vvix_pct');       vvp is not None and vvp > cfg['vvix_pct_max']     and reasons.append('vvix_high')
-    sz  = sig.get('skew_z');         sz  is not None and sz  > cfg['skew_zscore_max']  and reasons.append('skew_extreme')
-    ti  = sig.get('term_inv_ratio'); ti  is not None and ti  > cfg['term_inv_ratio']   and reasons.append('term_inv')
-    gp  = sig.get('gap_pct');        gp  is not None and abs(gp) > cfg['gap_skip_pct'] and reasons.append('gap')
-    return bool(reasons), ','.join(reasons)
+
+    dt = sig.get('date')
+    if dt and dt in MACRO_SKIP_DATES:
+        reasons.append('macro')
+
+    gp = sig.get('gap_pct')
+    if gp is not None and abs(gp) > cfg.get('gap_skip_pct', 0.010):
+        reasons.append('gap')
+
+    vix_today = sig.get('vix', 20.0) or 20.0
+    sigma_pct = vix_today / math.sqrt(252)
+    if sigma_pct < cfg.get('min_sigma_pct', 0.85):
+        reasons.append('sigma_low')
+
+    risk_score = _compute_risk_score(sig)
+    if risk_score > cfg.get('risk_score_max', 0.25):
+        reasons.append(f'risk:{risk_score:.3f}')
+
+    return bool(reasons), ','.join(reasons), risk_score
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -624,13 +735,14 @@ def main():
     trade_dates = [d for d in all_dates if d >= earliest_start]
     ref_cfg = next(iter(active.values()))
     gated = sum(1 for d in trade_dates if apply_gate(signals.get(d, {}), ref_cfg)[0])
+    log(f'  (risk_score gate uses composite v9: vix_5d×3 + term_inv×2.5 + rvol5×2 + vvix×1.5 + vix_pct×1 + vrp×0.8 - skew×0.5)')
     log(f'Trade-eligible dates: {len(trade_dates)}, gated out (SPY ref, env only): {gated}')
 
     fields = ['ticker', 'date', 'traded', 'reason', 'pnl_usd', 'won',
               'max_loss_usd', 'S_open', 'S_close', 'premium', 'close_cost',
               'ksc', 'ksp', 'klc', 'klp',
               'n_short', 'n_wing', 'daily_sigma_pct', 'put_wing_mult', 'rr_ratio',
-              'wing_regime', 'source']
+              'wing_regime', 'risk_score', 'macro_event', 'source']
     trades_path = out / 'trades.csv'
     with trades_path.open('w', newline='') as f:
         csv.DictWriter(f, fieldnames=fields, extrasaction='ignore').writeheader()
@@ -657,16 +769,22 @@ def main():
             gap_pct = (S_open / prev_c - 1.0) if prev_c else 0.0
             rvol5   = rvol5_lookup.get(und, {}).get(dt)
             sig = {**base_sig,
+                   'date':    dt,
                    'gap_pct': gap_pct,
                    'rvol5':   rvol5 if rvol5 is not None else vix_today / 100 / math.sqrt(252)}
 
-            skip, reason = apply_gate(sig, cfg)
+            skip, reason, risk_score = apply_gate(sig, cfg)
+            sig['risk_score'] = risk_score   # available to select_best_combo for tight-strike gate
             if skip:
                 all_rows.append({'ticker': sym, 'date': dt, 'traded': False,
-                                 'reason': f'gate:{reason}', 'pnl_usd': 0.0})
+                                 'reason': f'gate:{reason}', 'pnl_usd': 0.0,
+                                 'risk_score': round(risk_score, 4)})
             else:
-                all_rows.append(run_one(sym, dt, S_open, S_close,
-                                        vix_today, skew_z_today, cache_dir, cfg, sig=sig))
+                row = run_one(sym, dt, S_open, S_close,
+                              vix_today, skew_z_today, cache_dir, cfg, sig=sig)
+                row['risk_score']  = round(risk_score, 4)
+                row['macro_event'] = dt in MACRO_SKIP_DATES  # always False here (gate passed)
+                all_rows.append(row)
 
         if i % 10 == 0:
             pd.DataFrame(all_rows).to_csv(trades_path, index=False)

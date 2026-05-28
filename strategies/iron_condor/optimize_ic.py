@@ -123,7 +123,7 @@ def run_combo(ticker, cfg, all_dates, px_map, signals,
         sig    = {**base_sig, 'gap_pct': gap,
                   'rvol5': rv5 if rv5 is not None else vix_today / 100 / math.sqrt(252)}
 
-        skip, _ = apply_gate(sig, cfg)
+        skip, _, _rs = apply_gate(sig, cfg)
         if skip:
             continue
 

@@ -1,0 +1,316 @@
+date,event,skip_dte,note
+2023-01-06,NFP,1,Non-Farm Payrolls 8:30am ET
+2023-01-09,NFP+1,1,Post-NFP drift day (after 2023-01-06)
+2023-01-12,CPI,1,CPI release 8:30am ET
+2023-01-13,CPI+1,1,Post-CPI drift day (after 2023-01-12)
+2023-01-27,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2023-01-30,PCE+1,1,Post-PCE drift day (after 2023-01-27)
+2023-02-01,FOMC,1,FOMC decision day ~2pm ET
+2023-02-02,FOMC+1,1,Post-FOMC drift day (after 2023-02-01)
+2023-02-03,NFP,1,Non-Farm Payrolls 8:30am ET
+2023-02-06,NFP+1,1,Post-NFP drift day (after 2023-02-03)
+2023-02-14,CPI,1,CPI release 8:30am ET
+2023-02-15,CPI+1,1,Post-CPI drift day (after 2023-02-14)
+2023-02-24,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2023-02-27,PCE+1,1,Post-PCE drift day (after 2023-02-24)
+2023-03-03,NFP,1,Non-Farm Payrolls 8:30am ET
+2023-03-06,NFP+1,1,Post-NFP drift day (after 2023-03-03)
+2023-03-14,CPI,1,CPI release 8:30am ET
+2023-03-15,CPI+1,1,Post-CPI drift day (after 2023-03-14)
+2023-03-22,FOMC,1,FOMC decision day ~2pm ET
+2023-03-23,FOMC+1,1,Post-FOMC drift day (after 2023-03-22)
+2023-03-31,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2023-04-03,PCE+1,1,Post-PCE drift day (after 2023-03-31)
+2023-04-07,NFP,1,Non-Farm Payrolls 8:30am ET
+2023-04-10,NFP+1,1,Post-NFP drift day (after 2023-04-07)
+2023-04-12,CPI,1,CPI release 8:30am ET
+2023-04-13,CPI+1,1,Post-CPI drift day (after 2023-04-12)
+2023-04-28,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2023-05-01,PCE+1,1,Post-PCE drift day (after 2023-04-28)
+2023-05-03,FOMC,1,FOMC decision day ~2pm ET
+2023-05-04,FOMC+1,1,Post-FOMC drift day (after 2023-05-03)
+2023-05-05,NFP,1,Non-Farm Payrolls 8:30am ET
+2023-05-08,NFP+1,1,Post-NFP drift day (after 2023-05-05)
+2023-05-10,CPI,1,CPI release 8:30am ET
+2023-05-11,CPI+1,1,Post-CPI drift day (after 2023-05-10)
+2023-05-26,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2023-05-29,PCE+1,1,Post-PCE drift day (after 2023-05-26)
+2023-06-02,NFP,1,Non-Farm Payrolls 8:30am ET
+2023-06-05,NFP+1,1,Post-NFP drift day (after 2023-06-02)
+2023-06-13,CPI,1,CPI release 8:30am ET
+2023-06-14,FOMC,1,FOMC decision day ~2pm ET
+2023-06-15,FOMC+1,1,Post-FOMC drift day (after 2023-06-14)
+2023-06-30,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2023-07-03,PCE+1,1,Post-PCE drift day (after 2023-06-30)
+2023-07-07,NFP,1,Non-Farm Payrolls 8:30am ET
+2023-07-10,NFP+1,1,Post-NFP drift day (after 2023-07-07)
+2023-07-12,CPI,1,CPI release 8:30am ET
+2023-07-13,CPI+1,1,Post-CPI drift day (after 2023-07-12)
+2023-07-26,FOMC,1,FOMC decision day ~2pm ET
+2023-07-27,FOMC+1,1,Post-FOMC drift day (after 2023-07-26)
+2023-07-28,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2023-07-31,PCE+1,1,Post-PCE drift day (after 2023-07-28)
+2023-08-04,NFP,1,Non-Farm Payrolls 8:30am ET
+2023-08-07,NFP+1,1,Post-NFP drift day (after 2023-08-04)
+2023-08-10,CPI,1,CPI release 8:30am ET
+2023-08-11,CPI+1,1,Post-CPI drift day (after 2023-08-10)
+2023-08-25,JACKSON_HOLE,1,Jackson Hole Fed symposium speech — high volatility risk
+2023-09-01,NFP,1,Non-Farm Payrolls 8:30am ET
+2023-09-04,NFP+1,1,Post-NFP drift day (after 2023-09-01)
+2023-09-13,CPI,1,CPI release 8:30am ET
+2023-09-14,CPI+1,1,Post-CPI drift day (after 2023-09-13)
+2023-09-20,FOMC,1,FOMC decision day ~2pm ET
+2023-09-21,FOMC+1,1,Post-FOMC drift day (after 2023-09-20)
+2023-09-29,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2023-10-02,PCE+1,1,Post-PCE drift day (after 2023-09-29)
+2023-10-06,NFP,1,Non-Farm Payrolls 8:30am ET
+2023-10-09,NFP+1,1,Post-NFP drift day (after 2023-10-06)
+2023-10-12,CPI,1,CPI release 8:30am ET
+2023-10-13,CPI+1,1,Post-CPI drift day (after 2023-10-12)
+2023-10-27,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2023-10-30,PCE+1,1,Post-PCE drift day (after 2023-10-27)
+2023-11-01,FOMC,1,FOMC decision day ~2pm ET
+2023-11-02,FOMC+1,1,Post-FOMC drift day (after 2023-11-01)
+2023-11-03,NFP,1,Non-Farm Payrolls 8:30am ET
+2023-11-06,NFP+1,1,Post-NFP drift day (after 2023-11-03)
+2023-11-14,CPI,1,CPI release 8:30am ET
+2023-11-15,CPI+1,1,Post-CPI drift day (after 2023-11-14)
+2023-11-24,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2023-11-27,PCE+1,1,Post-PCE drift day (after 2023-11-24)
+2023-12-01,NFP,1,Non-Farm Payrolls 8:30am ET
+2023-12-04,NFP+1,1,Post-NFP drift day (after 2023-12-01)
+2023-12-12,CPI,1,CPI release 8:30am ET
+2023-12-13,FOMC,1,FOMC decision day ~2pm ET
+2023-12-14,FOMC+1,1,Post-FOMC drift day (after 2023-12-13)
+2023-12-29,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2024-01-01,PCE+1,1,Post-PCE drift day (after 2023-12-29)
+2024-01-05,NFP,1,Non-Farm Payrolls 8:30am ET
+2024-01-08,NFP+1,1,Post-NFP drift day (after 2024-01-05)
+2024-01-11,CPI,1,CPI release 8:30am ET
+2024-01-12,CPI+1,1,Post-CPI drift day (after 2024-01-11)
+2024-01-26,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2024-01-29,PCE+1,1,Post-PCE drift day (after 2024-01-26)
+2024-01-31,FOMC,1,FOMC decision day ~2pm ET
+2024-02-01,FOMC+1,1,Post-FOMC drift day (after 2024-01-31)
+2024-02-02,NFP,1,Non-Farm Payrolls 8:30am ET
+2024-02-05,NFP+1,1,Post-NFP drift day (after 2024-02-02)
+2024-02-13,CPI,1,CPI release 8:30am ET
+2024-02-14,CPI+1,1,Post-CPI drift day (after 2024-02-13)
+2024-02-23,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2024-02-26,PCE+1,1,Post-PCE drift day (after 2024-02-23)
+2024-03-01,NFP,1,Non-Farm Payrolls 8:30am ET
+2024-03-04,NFP+1,1,Post-NFP drift day (after 2024-03-01)
+2024-03-12,CPI,1,CPI release 8:30am ET
+2024-03-13,CPI+1,1,Post-CPI drift day (after 2024-03-12)
+2024-03-20,FOMC,1,FOMC decision day ~2pm ET
+2024-03-21,FOMC+1,1,Post-FOMC drift day (after 2024-03-20)
+2024-03-29,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2024-04-01,PCE+1,1,Post-PCE drift day (after 2024-03-29)
+2024-04-05,NFP,1,Non-Farm Payrolls 8:30am ET
+2024-04-08,NFP+1,1,Post-NFP drift day (after 2024-04-05)
+2024-04-10,CPI,1,CPI release 8:30am ET
+2024-04-11,CPI+1,1,Post-CPI drift day (after 2024-04-10)
+2024-04-26,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2024-04-29,PCE+1,1,Post-PCE drift day (after 2024-04-26)
+2024-05-01,FOMC,1,FOMC decision day ~2pm ET
+2024-05-02,FOMC+1,1,Post-FOMC drift day (after 2024-05-01)
+2024-05-03,NFP,1,Non-Farm Payrolls 8:30am ET
+2024-05-06,NFP+1,1,Post-NFP drift day (after 2024-05-03)
+2024-05-15,CPI,1,CPI release 8:30am ET
+2024-05-16,CPI+1,1,Post-CPI drift day (after 2024-05-15)
+2024-05-31,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2024-06-03,PCE+1,1,Post-PCE drift day (after 2024-05-31)
+2024-06-07,NFP,1,Non-Farm Payrolls 8:30am ET
+2024-06-10,NFP+1,1,Post-NFP drift day (after 2024-06-07)
+2024-06-12,FOMC,1,FOMC decision day ~2pm ET
+2024-06-12,CPI,1,CPI release 8:30am ET
+2024-06-13,FOMC+1,1,Post-FOMC drift day (after 2024-06-12)
+2024-06-28,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2024-07-01,PCE+1,1,Post-PCE drift day (after 2024-06-28)
+2024-07-05,NFP,1,Non-Farm Payrolls 8:30am ET
+2024-07-08,NFP+1,1,Post-NFP drift day (after 2024-07-05)
+2024-07-11,CPI,1,CPI release 8:30am ET
+2024-07-12,CPI+1,1,Post-CPI drift day (after 2024-07-11)
+2024-07-26,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2024-07-29,PCE+1,1,Post-PCE drift day (after 2024-07-26)
+2024-07-31,FOMC,1,FOMC decision day ~2pm ET
+2024-08-01,FOMC+1,1,Post-FOMC drift day (after 2024-07-31)
+2024-08-02,NFP,1,Non-Farm Payrolls 8:30am ET
+2024-08-05,NFP+1,1,Post-NFP drift day (after 2024-08-02)
+2024-08-14,CPI,1,CPI release 8:30am ET
+2024-08-15,CPI+1,1,Post-CPI drift day (after 2024-08-14)
+2024-08-23,JACKSON_HOLE,1,Jackson Hole Fed symposium speech — high volatility risk
+2024-08-30,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2024-09-02,PCE+1,1,Post-PCE drift day (after 2024-08-30)
+2024-09-06,NFP,1,Non-Farm Payrolls 8:30am ET
+2024-09-09,NFP+1,1,Post-NFP drift day (after 2024-09-06)
+2024-09-11,CPI,1,CPI release 8:30am ET
+2024-09-12,CPI+1,1,Post-CPI drift day (after 2024-09-11)
+2024-09-18,FOMC,1,FOMC decision day ~2pm ET
+2024-09-19,FOMC+1,1,Post-FOMC drift day (after 2024-09-18)
+2024-09-27,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2024-09-30,PCE+1,1,Post-PCE drift day (after 2024-09-27)
+2024-10-04,NFP,1,Non-Farm Payrolls 8:30am ET
+2024-10-07,NFP+1,1,Post-NFP drift day (after 2024-10-04)
+2024-10-10,CPI,1,CPI release 8:30am ET
+2024-10-11,CPI+1,1,Post-CPI drift day (after 2024-10-10)
+2024-10-25,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2024-10-28,PCE+1,1,Post-PCE drift day (after 2024-10-25)
+2024-11-01,NFP,1,Non-Farm Payrolls 8:30am ET
+2024-11-04,NFP+1,1,Post-NFP drift day (after 2024-11-01)
+2024-11-07,FOMC,1,FOMC decision day ~2pm ET
+2024-11-08,FOMC+1,1,Post-FOMC drift day (after 2024-11-07)
+2024-11-13,CPI,1,CPI release 8:30am ET
+2024-11-14,CPI+1,1,Post-CPI drift day (after 2024-11-13)
+2024-11-29,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2024-12-02,PCE+1,1,Post-PCE drift day (after 2024-11-29)
+2024-12-06,NFP,1,Non-Farm Payrolls 8:30am ET
+2024-12-09,NFP+1,1,Post-NFP drift day (after 2024-12-06)
+2024-12-11,CPI,1,CPI release 8:30am ET
+2024-12-12,CPI+1,1,Post-CPI drift day (after 2024-12-11)
+2024-12-18,FOMC,1,FOMC decision day ~2pm ET
+2024-12-19,FOMC+1,1,Post-FOMC drift day (after 2024-12-18)
+2024-12-27,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2024-12-30,PCE+1,1,Post-PCE drift day (after 2024-12-27)
+2025-01-10,NFP,1,Non-Farm Payrolls 8:30am ET
+2025-01-13,NFP+1,1,Post-NFP drift day (after 2025-01-10)
+2025-01-15,CPI,1,CPI release 8:30am ET
+2025-01-16,CPI+1,1,Post-CPI drift day (after 2025-01-15)
+2025-01-29,FOMC,1,FOMC decision day ~2pm ET
+2025-01-30,FOMC+1,1,Post-FOMC drift day (after 2025-01-29)
+2025-01-31,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2025-02-03,PCE+1,1,Post-PCE drift day (after 2025-01-31)
+2025-02-07,NFP,1,Non-Farm Payrolls 8:30am ET
+2025-02-10,NFP+1,1,Post-NFP drift day (after 2025-02-07)
+2025-02-12,CPI,1,CPI release 8:30am ET
+2025-02-13,CPI+1,1,Post-CPI drift day (after 2025-02-12)
+2025-02-28,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2025-03-03,PCE+1,1,Post-PCE drift day (after 2025-02-28)
+2025-03-07,NFP,1,Non-Farm Payrolls 8:30am ET
+2025-03-10,NFP+1,1,Post-NFP drift day (after 2025-03-07)
+2025-03-12,CPI,1,CPI release 8:30am ET
+2025-03-13,CPI+1,1,Post-CPI drift day (after 2025-03-12)
+2025-03-19,FOMC,1,FOMC decision day ~2pm ET
+2025-03-20,FOMC+1,1,Post-FOMC drift day (after 2025-03-19)
+2025-03-28,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2025-03-31,PCE+1,1,Post-PCE drift day (after 2025-03-28)
+2025-04-04,NFP,1,Non-Farm Payrolls 8:30am ET
+2025-04-07,NFP+1,1,Post-NFP drift day (after 2025-04-04)
+2025-04-10,CPI,1,CPI release 8:30am ET
+2025-04-11,CPI+1,1,Post-CPI drift day (after 2025-04-10)
+2025-04-25,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2025-04-28,PCE+1,1,Post-PCE drift day (after 2025-04-25)
+2025-05-02,NFP,1,Non-Farm Payrolls 8:30am ET
+2025-05-05,NFP+1,1,Post-NFP drift day (after 2025-05-02)
+2025-05-07,FOMC,1,FOMC decision day ~2pm ET
+2025-05-08,FOMC+1,1,Post-FOMC drift day (after 2025-05-07)
+2025-05-13,CPI,1,CPI release 8:30am ET
+2025-05-14,CPI+1,1,Post-CPI drift day (after 2025-05-13)
+2025-05-30,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2025-06-02,PCE+1,1,Post-PCE drift day (after 2025-05-30)
+2025-06-06,NFP,1,Non-Farm Payrolls 8:30am ET
+2025-06-09,NFP+1,1,Post-NFP drift day (after 2025-06-06)
+2025-06-11,CPI,1,CPI release 8:30am ET
+2025-06-12,CPI+1,1,Post-CPI drift day (after 2025-06-11)
+2025-06-18,FOMC,1,FOMC decision day ~2pm ET
+2025-06-19,FOMC+1,1,Post-FOMC drift day (after 2025-06-18)
+2025-06-27,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2025-06-30,PCE+1,1,Post-PCE drift day (after 2025-06-27)
+2025-07-03,NFP,0,NFP near July 4 holiday - check actual date
+2025-07-04,NFP+1,1,Post-NFP drift day (after 2025-07-03)
+2025-07-15,CPI,1,CPI release 8:30am ET
+2025-07-16,CPI+1,1,Post-CPI drift day (after 2025-07-15)
+2025-07-25,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2025-07-28,PCE+1,1,Post-PCE drift day (after 2025-07-25)
+2025-07-30,FOMC,1,FOMC decision day ~2pm ET
+2025-07-31,FOMC+1,1,Post-FOMC drift day (after 2025-07-30)
+2025-08-01,NFP,1,Non-Farm Payrolls 8:30am ET
+2025-08-04,NFP+1,1,Post-NFP drift day (after 2025-08-01)
+2025-08-12,CPI,1,CPI release 8:30am ET
+2025-08-13,CPI+1,1,Post-CPI drift day (after 2025-08-12)
+2025-08-22,JACKSON_HOLE,1,Jackson Hole Fed symposium speech — high volatility risk
+2025-08-29,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2025-09-01,PCE+1,1,Post-PCE drift day (after 2025-08-29)
+2025-09-05,NFP,1,Non-Farm Payrolls 8:30am ET
+2025-09-08,NFP+1,1,Post-NFP drift day (after 2025-09-05)
+2025-09-10,CPI,1,CPI release 8:30am ET
+2025-09-11,CPI+1,1,Post-CPI drift day (after 2025-09-10)
+2025-09-17,FOMC,1,FOMC decision day ~2pm ET
+2025-09-18,FOMC+1,1,Post-FOMC drift day (after 2025-09-17)
+2025-09-26,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2025-09-29,PCE+1,1,Post-PCE drift day (after 2025-09-26)
+2025-10-03,NFP,1,Non-Farm Payrolls 8:30am ET
+2025-10-06,NFP+1,1,Post-NFP drift day (after 2025-10-03)
+2025-10-15,CPI,1,CPI release 8:30am ET
+2025-10-16,CPI+1,1,Post-CPI drift day (after 2025-10-15)
+2025-10-29,FOMC,1,FOMC decision day ~2pm ET
+2025-10-30,FOMC+1,1,Post-FOMC drift day (after 2025-10-29)
+2025-10-31,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2025-11-03,PCE+1,1,Post-PCE drift day (after 2025-10-31)
+2025-11-07,NFP,1,Non-Farm Payrolls 8:30am ET
+2025-11-10,NFP+1,1,Post-NFP drift day (after 2025-11-07)
+2025-11-13,CPI,1,CPI release 8:30am ET
+2025-11-14,CPI+1,1,Post-CPI drift day (after 2025-11-13)
+2025-11-28,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2025-12-01,PCE+1,1,Post-PCE drift day (after 2025-11-28)
+2025-12-05,NFP,1,Non-Farm Payrolls 8:30am ET
+2025-12-08,NFP+1,1,Post-NFP drift day (after 2025-12-05)
+2025-12-10,FOMC,1,FOMC decision day ~2pm ET
+2025-12-10,CPI,1,CPI release 8:30am ET
+2025-12-11,FOMC+1,1,Post-FOMC drift day (after 2025-12-10)
+2025-12-26,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2025-12-29,PCE+1,1,Post-PCE drift day (after 2025-12-26)
+2026-01-02,NFP,0,Near holiday - check actual date
+2026-01-05,NFP+1,1,Post-NFP drift day (after 2026-01-02)
+2026-01-15,CPI,1,CPI release 8:30am ET
+2026-01-16,CPI+1,1,Post-CPI drift day (after 2026-01-15)
+2026-01-28,FOMC,1,FOMC decision day ~2pm ET
+2026-01-29,FOMC+1,1,Post-FOMC drift day (after 2026-01-28)
+2026-01-30,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2026-02-02,PCE+1,1,Post-PCE drift day (after 2026-01-30)
+2026-02-06,NFP,1,Non-Farm Payrolls 8:30am ET
+2026-02-09,NFP+1,1,Post-NFP drift day (after 2026-02-06)
+2026-02-11,CPI,1,CPI release 8:30am ET
+2026-02-12,CPI+1,1,Post-CPI drift day (after 2026-02-11)
+2026-02-27,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2026-03-02,PCE+1,1,Post-PCE drift day (after 2026-02-27)
+2026-03-06,NFP,1,Non-Farm Payrolls 8:30am ET
+2026-03-09,NFP+1,1,Post-NFP drift day (after 2026-03-06)
+2026-03-11,CPI,1,CPI release 8:30am ET
+2026-03-12,CPI+1,1,Post-CPI drift day (after 2026-03-11)
+2026-03-18,FOMC,1,FOMC decision day ~2pm ET
+2026-03-19,FOMC+1,1,Post-FOMC drift day (after 2026-03-18)
+2026-03-27,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2026-03-30,PCE+1,1,Post-PCE drift day (after 2026-03-27)
+2026-04-03,NFP,1,Non-Farm Payrolls 8:30am ET
+2026-04-06,NFP+1,1,Post-NFP drift day (after 2026-04-03)
+2026-04-09,CPI,1,CPI release 8:30am ET
+2026-04-10,CPI+1,1,Post-CPI drift day (after 2026-04-09)
+2026-04-24,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2026-04-27,PCE+1,1,Post-PCE drift day (after 2026-04-24)
+2026-04-29,FOMC,1,FOMC decision day ~2pm ET
+2026-04-30,FOMC+1,1,Post-FOMC drift day (after 2026-04-29)
+2026-05-01,NFP,1,Non-Farm Payrolls 8:30am ET
+2026-05-04,NFP+1,1,Post-NFP drift day (after 2026-05-01)
+2026-05-13,CPI,1,CPI release 8:30am ET
+2026-05-14,CPI+1,1,Post-CPI drift day (after 2026-05-13)
+2026-05-29,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2026-06-01,PCE+1,1,Post-PCE drift day (after 2026-05-29)
+2026-06-05,NFP,1,Non-Farm Payrolls 8:30am ET
+2026-06-08,NFP+1,1,Post-NFP drift day (after 2026-06-05)
+2026-06-17,FOMC,1,FOMC decision day ~2pm ET
+2026-06-18,FOMC+1,1,Post-FOMC drift day (after 2026-06-17)
+2026-06-26,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2026-06-29,PCE+1,1,Post-PCE drift day (after 2026-06-26)
+2026-07-31,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2026-08-03,PCE+1,1,Post-PCE drift day (after 2026-07-31)
+2026-08-28,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2026-08-31,PCE+1,1,Post-PCE drift day (after 2026-08-28)
+2026-09-25,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2026-09-28,PCE+1,1,Post-PCE drift day (after 2026-09-25)
+2026-10-30,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2026-11-02,PCE+1,1,Post-PCE drift day (after 2026-10-30)
+2026-11-27,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2026-11-30,PCE+1,1,Post-PCE drift day (after 2026-11-27)
+2026-12-25,PCE,1,PCE inflation release 8:30am ET (Fed preferred measure)
+2026-12-28,PCE+1,1,Post-PCE drift day (after 2026-12-25)
